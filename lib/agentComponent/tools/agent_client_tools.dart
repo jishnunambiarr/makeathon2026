@@ -6,6 +6,9 @@ import 'package:campus_flutter/base/routing/router.dart';
 import 'package:campus_flutter/base/routing/routes.dart' as routes;
 import 'package:campus_flutter/calendarComponent/views/calendars_view.dart';
 import 'package:campus_flutter/campusComponent/service/news_service.dart';
+import 'package:campus_flutter/calendarComponent/model/calendar_editing.dart';
+import 'package:campus_flutter/calendarComponent/model/calendar_event.dart';
+import 'package:campus_flutter/calendarComponent/services/calendar_service.dart';
 import 'package:campus_flutter/calendarComponent/viewModels/calendar_viewmodel.dart';
 import 'package:campus_flutter/homeComponent/service/departures_service.dart';
 import 'package:campus_flutter/navigaTumComponent/services/navigatum_service.dart';
@@ -33,6 +36,7 @@ class AgentClientTools {
 
   static const String toolGetNextEvents = 'get_next_events';
   static const String toolGetScheduleRange = 'get_schedule_range';
+  static const String toolCreateCalendarEvent = 'create_calendar_event';
   static const String toolGetMyCourses = 'get_my_courses';
   static const String toolGetGrades = 'get_grades';
 
@@ -79,6 +83,9 @@ class AgentClientTools {
       ),
       toolGetScheduleRange: _RequireLoginTool(
         delegate: _GetScheduleRangeTool(ref: ref),
+      ),
+      toolCreateCalendarEvent: _RequireLoginTool(
+        delegate: _CreateCalendarEventTool(ref: ref),
       ),
       toolGetMyCourses: _RequireLoginTool(delegate: _GetMyCoursesTool()),
       toolGetGrades: _RequireLoginTool(delegate: _GetGradesTool()),
@@ -298,27 +305,91 @@ class _GetNextEventsTool implements ClientTool {
 
   @override
   Future<ClientToolResult?> execute(Map<String, dynamic> parameters) async {
-    final limit = _asInt(parameters['limit'], defaultValue: 5, min: 1, max: 20);
+    final limit = _asInt(parameters['limit'], defaultValue: 5, min: 1, max: 30);
 
-    // Use the same in-app event list & visibility filtering as the Calendar UI.
-    // This avoids reporting events the user has hidden or that were canceled.
     final vm = ref.read(calendarViewModel);
-    await vm.fetch(false);
-    final events = vm.events.value ?? const [];
+    final loaded = await vm.fetch(true);
+    if (!loaded) {
+      return ClientToolResult.failure(
+        'Could not load calendar. Check login and network.',
+      );
+    }
 
+    final events = vm.events.value ?? const <CalendarEvent>[];
     final now = DateTime.now();
     final showHidden = ref.read(showHiddenCalendarEntries);
-    final upcoming = events
-        .where(
-          (e) =>
-              e.startDate.isAfter(now) &&
-              (showHidden ? true : (e.isVisible ?? true)) &&
-              !e.isCanceled,
-        )
-        .toList()
-      ..sort((a, b) => a.startDate.compareTo(b.startDate));
 
-    final items = upcoming.take(limit).map((e) {
+    final fromStr = _asString(parameters['from']);
+    final toStr = _asString(parameters['to']);
+    final List<CalendarEvent> filtered;
+
+    if (fromStr != null &&
+        fromStr.trim().isNotEmpty &&
+        toStr != null &&
+        toStr.trim().isNotEmpty) {
+      late DateTime rangeStart;
+      late DateTime rangeEnd;
+      try {
+        rangeStart = DateTime.parse(fromStr.trim());
+        rangeEnd = DateTime.parse(toStr.trim());
+      } catch (_) {
+        return ClientToolResult.failure(
+          'Invalid "from" / "to". Use ISO-8601 datetimes.',
+        );
+      }
+      if (!rangeEnd.isAfter(rangeStart)) {
+        return ClientToolResult.failure('Range "to" must be after "from".');
+      }
+      filtered = events
+          .where(
+            (e) =>
+                _calendarEventVisible(e, showHidden) &&
+                _eventOverlapsRange(e, rangeStart, rangeEnd),
+          )
+          .toList();
+    } else {
+      final window =
+          (_asString(parameters['window']) ?? 'upcoming').toLowerCase();
+      switch (window) {
+        case 'today':
+          final start = _day(now);
+          final end = _day(now).add(const Duration(days: 1));
+          filtered = events
+              .where(
+                (e) =>
+                    _calendarEventVisible(e, showHidden) &&
+                    _eventOverlapsRange(e, start, end),
+              )
+              .toList();
+          break;
+        case 'rest_of_today':
+          final start = _day(now);
+          final end = _day(now).add(const Duration(days: 1));
+          filtered = events
+              .where(
+                (e) =>
+                    _calendarEventVisible(e, showHidden) &&
+                    _eventOverlapsRange(e, start, end) &&
+                    e.endDate.isAfter(now),
+              )
+              .toList();
+          break;
+        case 'upcoming':
+        default:
+          filtered = events
+              .where(
+                (e) =>
+                    _calendarEventVisible(e, showHidden) &&
+                    e.endDate.isAfter(now),
+              )
+              .toList();
+          break;
+      }
+    }
+
+    filtered.sort((a, b) => a.startDate.compareTo(b.startDate));
+
+    final items = filtered.take(limit).map((e) {
       return {
         'id': e.id,
         'title': e.title,
@@ -356,7 +427,12 @@ class _GetScheduleRangeTool implements ClientTool {
     final (start, end, resolvedRange) = parsed;
 
     final vm = ref.read(calendarViewModel);
-    await vm.fetch(false);
+    final loaded = await vm.fetch(true);
+    if (!loaded) {
+      return ClientToolResult.failure(
+        'Could not load calendar. Check login and network.',
+      );
+    }
     final events = vm.events.value ?? const [];
     final showHidden = ref.read(showHiddenCalendarEntries);
 
@@ -430,6 +506,77 @@ class _GetScheduleRangeTool implements ClientTool {
             },
       'days': days,
     });
+  }
+}
+
+class _CreateCalendarEventTool implements ClientTool {
+  final WidgetRef ref;
+  _CreateCalendarEventTool({required this.ref});
+
+  @override
+  Future<ClientToolResult?> execute(Map<String, dynamic> parameters) async {
+    final title = _asString(parameters['title']);
+    final fromStr = _asString(parameters['from']);
+    final toStr = _asString(parameters['to']);
+    final note =
+        _asString(parameters['annotation']) ?? _asString(parameters['note']);
+
+    if (title == null || title.trim().isEmpty) {
+      return ClientToolResult.failure('Missing parameter "title".');
+    }
+    if (fromStr == null ||
+        fromStr.trim().isEmpty ||
+        toStr == null ||
+        toStr.trim().isEmpty) {
+      return ClientToolResult.failure(
+        'Missing parameters "from" and "to" (ISO-8601 date times).',
+      );
+    }
+
+    late DateTime from;
+    late DateTime to;
+    try {
+      from = DateTime.parse(fromStr.trim());
+      to = DateTime.parse(toStr.trim());
+    } catch (_) {
+      return ClientToolResult.failure(
+        'Could not parse "from" / "to" as ISO-8601 datetimes.',
+      );
+    }
+
+    if (!to.isAfter(from)) {
+      return ClientToolResult.failure('"to" must be after "from".');
+    }
+
+    try {
+      final confirmation = await CalendarService.createCalendarEvent(
+        AddedCalendarEvent(
+          title: title.trim(),
+          annotation:
+              note != null && note.trim().isNotEmpty ? note.trim() : null,
+          from: from,
+          to: to,
+        ),
+      );
+      final refreshed = await ref.read(calendarViewModel).fetch(true);
+      if (!refreshed) {
+        return ClientToolResult.success({
+          'eventId': confirmation.eventId,
+          'title': title.trim(),
+          'from': from.toIso8601String(),
+          'to': to.toIso8601String(),
+          'warning': 'Event created but calendar could not be refreshed.',
+        });
+      }
+      return ClientToolResult.success({
+        'eventId': confirmation.eventId,
+        'title': title.trim(),
+        'from': from.toIso8601String(),
+        'to': to.toIso8601String(),
+      });
+    } catch (e) {
+      return ClientToolResult.failure('Could not create event: ${e.toString()}');
+    }
   }
 }
 
@@ -646,6 +793,14 @@ class _FocusCalendarRangeTool implements ClientTool {
       'view': view.name,
     });
   }
+}
+
+bool _calendarEventVisible(CalendarEvent e, bool showHidden) {
+  return !e.isCanceled && (showHidden || (e.isVisible ?? true));
+}
+
+bool _eventOverlapsRange(CalendarEvent e, DateTime start, DateTime end) {
+  return e.startDate.isBefore(end) && e.endDate.isAfter(start);
 }
 
 String _isoDate(DateTime d) => '${d.year.toString().padLeft(4, '0')}-'
