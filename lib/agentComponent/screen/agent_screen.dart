@@ -166,8 +166,7 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
       await _client.setMicMuted(false);
       if (mounted) {
         _coco.overlayExpanded.value = false;
-        // Avatar lives in this tab; keep global overlay off to avoid two Rive heads.
-        _coco.visible.value = false;
+        _coco.voiceSessionActive.value = true;
       }
     } catch (e) {
       setState(() {
@@ -214,12 +213,11 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
                   child: Stack(
                     children: [
                       Positioned.fill(
-                        child: OrbWidget(
-                          state: s,
-                          input: connected && !s.isTalking ? 0.35 : 0.1,
-                          output: _client.isSpeaking ? 0.85 : 0.35,
-                          color1: const Color(0xFFCADCFC),
-                          color2: const Color(0xFFA0B9D1),
+                        child: CocoAvatar(
+                          assetPath: 'assets/rive/554-1038-my-avatar.riv',
+                          outputAmplitudeListenable: _coco.outputAmplitude,
+                          thinkingListenable: _coco.thinking,
+                          fit: Fit.contain,
                         ),
                       ),
                       Positioned(
