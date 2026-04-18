@@ -6,7 +6,7 @@ import 'package:campus_flutter/ui/coco_avatar.dart';
 import 'package:campus_flutter/ui/coco_overlay_service.dart';
 import 'package:elevenlabs_agents/elevenlabs_agents.dart';
 import 'package:flutter/material.dart';
-import 'package:rive/rive.dart';
+import 'package:rive/rive.dart' as rive;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -213,7 +213,7 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
                           assetPath: CocoOverlayService.defaultAvatarRivAsset,
                           outputAmplitudeListenable: _coco.outputAmplitude,
                           thinkingListenable: _coco.thinking,
-                          fit: Fit.contain,
+                          fit: rive.Fit.contain,
                         ),
                       ),
                       Positioned(
