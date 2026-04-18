@@ -2,13 +2,53 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { z } from 'zod';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { getElevenConversationToken } from './integrations/elevenlabs.js';
 import { dispatchTool } from './tools/dispatch.js';
+import { uploadMedia, sendFileMessage, sendTextMessage } from './integrations/matrix.js';
+import { runMoodleFetch } from './moodle/runFetch.js';
 
 const app = express();
 
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
+
+function guessMime(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.pdf') return 'application/pdf';
+  return 'application/octet-stream';
+}
+
+/** Optional shared secret for webhook routes (Bearer or `x-webhook-secret`). */
+function getWebhookSecret() {
+  return (
+    process.env.MATRIX_WEBHOOK_SECRET?.trim() ||
+    process.env.MOODLE_MATRIX_WEBHOOK_SECRET?.trim() ||
+    ''
+  );
+}
+
+function requireWebhookSecret(req, res, next) {
+  const secret = getWebhookSecret();
+  if (!secret) return next();
+  const auth = req.headers.authorization;
+  const bearer = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+  const header = req.headers['x-webhook-secret'];
+  if (bearer === secret || header === secret) return next();
+  return res.status(401).json({ error: 'unauthorized' });
+}
+
+function mergeWebhookBody(body) {
+  const b = body ?? {};
+  return {
+    ...b,
+    ...(typeof b.parameters === 'object' && b.parameters ? b.parameters : {}),
+    ...(typeof b.parameter_input === 'object' && b.parameter_input ? b.parameter_input : {}),
+  };
+}
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
@@ -66,6 +106,193 @@ app.post('/agent/tool', async (req, res) => {
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     return res.status(500).json({ error: 'tool_failed', message });
+  }
+});
+
+/**
+ * Server / webhook tool: run Moodle Playwright fetch, then post to Matrix.
+ *
+ * Default **`delivery`: `"link"`** — sends one text: assignment line + URL (no PDF upload).
+ * Use **`delivery`: `"file"`** to download and send an `m.file` (slower; needs a real file URL).
+ *
+ * Body: `{ "courseUrl", "match", "delivery"?: "link" | "file" }`
+ *
+ * Env: MATRIX_HOMESERVER, MATRIX_ACCESS_TOKEN, MATRIX_ROOM_ID; optional MOODLE_STORAGE_PATH,
+ * MATRIX_WEBHOOK_SECRET or MOODLE_MATRIX_WEBHOOK_SECRET.
+ */
+app.post('/webhooks/moodle-to-matrix', requireWebhookSecret, async (req, res) => {
+  const nested = mergeWebhookBody(req.body);
+
+  const schema = z.object({
+    courseUrl: z.string().url(),
+    match: z.string().min(1),
+    delivery: z.enum(['link', 'file']).optional().default('link'),
+  });
+
+  const parsed = schema.safeParse({
+    courseUrl: nested.courseUrl ?? nested.course_url,
+    match: nested.match,
+    delivery: nested.delivery,
+  });
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.format() });
+
+  const homeserver = process.env.MATRIX_HOMESERVER?.trim();
+  const accessToken = process.env.MATRIX_ACCESS_TOKEN?.trim();
+  const roomId = process.env.MATRIX_ROOM_ID?.trim();
+
+  if (!homeserver || !accessToken || !roomId) {
+    return res.status(500).json({
+      error: 'matrix_not_configured',
+      hint: 'Set MATRIX_HOMESERVER, MATRIX_ACCESS_TOKEN, MATRIX_ROOM_ID in .env',
+    });
+  }
+
+  const sendErr = async (msg) => {
+    try {
+      await sendTextMessage(homeserver, accessToken, roomId, msg);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('Matrix sendTextMessage failed', e);
+    }
+  };
+
+  let downloadDir = null;
+  try {
+    if (parsed.data.delivery === 'link') {
+      const { json } = await runMoodleFetch({
+        courseUrl: parsed.data.courseUrl,
+        match: parsed.data.match,
+        linkOnly: true,
+      });
+
+      if (!json.ok || !json.url) {
+        const detail = json.error ? String(json.error) : 'fetch_incomplete';
+        await sendErr(`Moodle → Matrix: ${detail} (course: ${parsed.data.courseUrl})`);
+        return res.status(200).json({ ok: false, moodle: json, matrix: 'notified_room_text' });
+      }
+
+      const matrixBody = `Here are the assignments for this week:\n${json.url}`;
+      const sent = await sendTextMessage(homeserver, accessToken, roomId, matrixBody);
+
+      return res.status(200).json({
+        ok: true,
+        delivery: 'link',
+        moodle: { title: json.title, url: json.url },
+        matrix: { event_id: sent.event_id },
+      });
+    }
+
+    downloadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'moodle-mx-'));
+    const { json } = await runMoodleFetch({
+      courseUrl: parsed.data.courseUrl,
+      match: parsed.data.match,
+      downloadDir,
+    });
+
+    if (!json.ok || !json.downloadedPath) {
+      const detail = json.error ? String(json.error) : 'fetch_incomplete';
+      await sendErr(`Moodle → Matrix: ${detail} (course: ${parsed.data.courseUrl})`);
+      return res.status(200).json({ ok: false, moodle: json, matrix: 'notified_room_text' });
+    }
+
+    const localPath = json.downloadedPath;
+    if (!path.isAbsolute(localPath) || !fs.existsSync(localPath)) {
+      await sendErr(`Moodle → Matrix: missing file after download (${localPath})`);
+      return res.status(200).json({ ok: false, moodle: json, matrix: 'notified_room_text' });
+    }
+
+    const buf = await readFile(localPath);
+    const filename = path.basename(localPath);
+    const mime = guessMime(localPath);
+    const contentUri = await uploadMedia(homeserver, accessToken, buf, mime, filename);
+    const sent = await sendFileMessage(
+      homeserver,
+      accessToken,
+      roomId,
+      contentUri,
+      filename,
+      buf.length,
+      mime,
+    );
+
+    return res.status(200).json({
+      ok: true,
+      delivery: 'file',
+      moodle: { title: json.title, url: json.url, filename },
+      matrix: { event_id: sent.event_id },
+    });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    // eslint-disable-next-line no-console
+    console.error('[moodle-to-matrix]', message);
+    try {
+      const homeserver2 = process.env.MATRIX_HOMESERVER?.trim();
+      const accessToken2 = process.env.MATRIX_ACCESS_TOKEN?.trim();
+      const roomId2 = process.env.MATRIX_ROOM_ID?.trim();
+      if (homeserver2 && accessToken2 && roomId2) {
+        await sendTextMessage(
+          homeserver2,
+          accessToken2,
+          roomId2,
+          `Moodle → Matrix failed: ${message.slice(0, 500)}`,
+        );
+      }
+    } catch {
+      /* ignore */
+    }
+    return res.status(500).json({ error: 'moodle_matrix_failed', message });
+  } finally {
+    if (downloadDir) fs.rmSync(downloadDir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Send an arbitrary plain-text message to `MATRIX_ROOM_ID` (mensa menu, links, summaries).
+ * The agent composes `message` (e.g. after calling other tools); this only posts to Matrix.
+ *
+ * Body: `{ "message": "…" }` (also accepts `body` / `text` for ElevenLabs naming quirks).
+ *
+ * Same env as other Matrix webhooks; optional `MATRIX_WEBHOOK_SECRET` or `MOODLE_MATRIX_WEBHOOK_SECRET`.
+ */
+app.post('/webhooks/matrix-message', requireWebhookSecret, async (req, res) => {
+  const nested = mergeWebhookBody(req.body);
+
+  const schema = z.object({
+    message: z.string().min(1).max(16_000),
+  });
+
+  const parsed = schema.safeParse({
+    message: nested.message ?? nested.body ?? nested.text,
+  });
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.format() });
+
+  const homeserver = process.env.MATRIX_HOMESERVER?.trim();
+  const accessToken = process.env.MATRIX_ACCESS_TOKEN?.trim();
+  const roomId = process.env.MATRIX_ROOM_ID?.trim();
+
+  if (!homeserver || !accessToken || !roomId) {
+    return res.status(500).json({
+      error: 'matrix_not_configured',
+      hint: 'Set MATRIX_HOMESERVER, MATRIX_ACCESS_TOKEN, MATRIX_ROOM_ID in .env',
+    });
+  }
+
+  try {
+    const sent = await sendTextMessage(
+      homeserver,
+      accessToken,
+      roomId,
+      parsed.data.message,
+    );
+    return res.status(200).json({
+      ok: true,
+      matrix: { event_id: sent.event_id },
+    });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    // eslint-disable-next-line no-console
+    console.error('[matrix-message]', message);
+    return res.status(500).json({ error: 'matrix_message_failed', message });
   }
 });
 
