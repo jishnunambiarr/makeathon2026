@@ -1,7 +1,11 @@
 import 'dart:math' as math;
 
+import 'package:campus_flutter/base/enums/campus.dart';
 import 'package:campus_flutter/base/enums/search_type.dart';
+import 'package:campus_flutter/base/enums/user_preference.dart';
 import 'package:campus_flutter/base/networking/protocols/api.dart';
+import 'package:campus_flutter/base/services/location_service.dart';
+import 'package:campus_flutter/base/services/user_preferences_service.dart';
 import 'package:campus_flutter/base/routing/router.dart';
 import 'package:campus_flutter/base/routing/routes.dart' as routes;
 import 'package:campus_flutter/calendarComponent/views/calendars_view.dart';
@@ -10,7 +14,9 @@ import 'package:campus_flutter/calendarComponent/model/calendar_editing.dart';
 import 'package:campus_flutter/calendarComponent/services/calendar_service.dart';
 import 'package:campus_flutter/calendarComponent/viewModels/calendar_viewmodel.dart';
 import 'package:campus_flutter/homeComponent/service/departures_service.dart';
+import 'package:campus_flutter/main.dart';
 import 'package:campus_flutter/navigaTumComponent/services/navigatum_service.dart';
+import 'package:campus_flutter/personComponent/services/profile_service.dart';
 import 'package:campus_flutter/placesComponent/model/cafeterias/cafeteria.dart';
 import 'package:campus_flutter/placesComponent/services/cafeterias_service.dart';
 import 'package:campus_flutter/placesComponent/services/mealplan_service.dart';
@@ -21,6 +27,7 @@ import 'package:campus_flutter/studiesComponent/service/grade_service.dart';
 import 'package:campus_flutter/studiesComponent/service/lecture_service.dart';
 import 'package:elevenlabs_agents/elevenlabs_agents.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:syncfusion_flutter_calendar/calendar.dart';
 
 /// Minimal, whitelisted tool surface for the in-app ElevenLabs agent.
@@ -38,6 +45,7 @@ class AgentClientTools {
   static const String toolCreateCalendarEvent = 'create_calendar_event';
   static const String toolGetMyCourses = 'get_my_courses';
   static const String toolGetGrades = 'get_grades';
+  static const String toolGetUserStatus = 'get_user_status';
 
   static const String toolNavigate = 'navigate';
   static const String toolOpenSearch = 'open_search';
@@ -86,6 +94,7 @@ class AgentClientTools {
       ),
       toolGetMyCourses: _RequireLoginTool(delegate: _GetMyCoursesTool()),
       toolGetGrades: _RequireLoginTool(delegate: _GetGradesTool()),
+      toolGetUserStatus: _RequireLoginTool(delegate: _GetUserStatusTool()),
 
       toolNavigate: _NavigateTool(ref: ref),
       toolOpenSearch: _OpenSearchTool(ref: ref),
@@ -107,6 +116,86 @@ class _RequireLoginTool implements ClientTool {
       return ClientToolResult.failure('Please log in in the app first.');
     }
     return await delegate.execute(parameters);
+  }
+}
+
+/// Campus for greetings: same rules as departures widget — saved campus preference,
+/// else closest [Campus] to last known GPS, else Garching.
+Future<({Campus campus, String source, double? distanceMeters})>
+    _resolveCampusForAgent() async {
+  final raw = getIt<UserPreferencesService>().load(UserPreference.departure);
+  if (raw != null) {
+    final idx = raw as int;
+    if (idx >= 0 && idx < Campus.values.length) {
+      return (
+        campus: Campus.values[idx],
+        source: 'preference',
+        distanceMeters: null,
+      );
+    }
+  }
+
+  final location = await LocationService.getLastKnown();
+  if (location != null) {
+    final closest = Campus.values.reduce((a, b) {
+      final da = Geolocator.distanceBetween(
+        a.location.latitude,
+        a.location.longitude,
+        location.latitude,
+        location.longitude,
+      );
+      final db = Geolocator.distanceBetween(
+        b.location.latitude,
+        b.location.longitude,
+        location.latitude,
+        location.longitude,
+      );
+      return da <= db ? a : b;
+    });
+    final meters = Geolocator.distanceBetween(
+      closest.location.latitude,
+      closest.location.longitude,
+      location.latitude,
+      location.longitude,
+    );
+    return (campus: closest, source: 'location', distanceMeters: meters);
+  }
+
+  return (
+    campus: Campus.garching,
+    source: 'default',
+    distanceMeters: null,
+  );
+}
+
+class _GetUserStatusTool implements ClientTool {
+  @override
+  Future<ClientToolResult?> execute(Map<String, dynamic> parameters) async {
+    try {
+      final (_, profile) = await ProfileService.fetchProfile(false);
+      final campusInfo = await _resolveCampusForAgent();
+      final displayName = profile.fullName.trim();
+      final payload = <String, dynamic>{
+        'firstName': profile.firstname,
+        'lastName': profile.surname,
+        'displayName': displayName.isEmpty ? null : displayName,
+        'tumId': profile.tumID,
+        'role': profile.role.name,
+        'closestCampus': campusInfo.campus.name,
+        'closestCampusSource': campusInfo.source,
+        'greetingHint':
+            'User is likely around ${campusInfo.campus.name} today (source: ${campusInfo.source}).',
+      };
+      if (campusInfo.distanceMeters != null) {
+        payload['approximateDistanceToCampusMeters'] =
+            campusInfo.distanceMeters!.round();
+      }
+      return ClientToolResult.success(payload);
+    } catch (e) {
+      return ClientToolResult.failure(
+        'Could not load user status: ${e.toString()}',
+      );
+    }
   }
 }
 
