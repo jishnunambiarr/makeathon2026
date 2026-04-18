@@ -35,6 +35,22 @@ target 'Runner' do
 end
 
 post_install do |installer|
+  # rive_native runs `dart run rive_native:setup` during the Xcode build with cwd
+  # `ios/Pods` (no trailing slash). Its setup script only adjusts when cwd ends with
+  # `/ios/Pods/`, so pubspec resolution fails. Running setup here from the app root
+  # downloads native binaries and creates `rive_marker_ios_setup_complete` under the
+  # pub-cache package before Xcode builds the pod.
+  flutter_app_dir = File.expand_path('..', __dir__)
+  dart_bin = File.join(flutter_root, 'bin', 'dart')
+  if File.exist?(dart_bin)
+    Dir.chdir(flutter_app_dir) do
+      success = system(dart_bin, 'run', 'rive_native:setup', '--platform', 'ios')
+      unless success
+        STDERR.puts '[!] rive_native:setup failed. Try from project root: dart run rive_native:setup --verbose --platform ios'
+      end
+    end
+  end
+
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
     target.build_configurations.each do |config|
