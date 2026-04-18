@@ -1,19 +1,12 @@
-![xcodebuild](https://github.com/TUM-Dev/campus_flutter/actions/workflows/deploy_beta.yml/badge.svg?branch=development)
-![xcodebuild](https://github.com/TUM-Dev/campus_flutter/actions/workflows/deploy_web.yml/badge.svg?branch=development)
-<a href="https://testflight.apple.com/join/4Ddi6f2f">
-<img src="https://developer.apple.com/assets/elements/icons/testflight/testflight-64x64_2x.png" height="42" align="right">
-</a>
-<!---
-<a href="https://itunes.apple.com/us/app/tum-campus-app/id1217412716?mt=8">
-<img src="https://devimages-cdn.apple.com/app-store/marketing/guidelines/images/badge-download-on-the-app-store.svg" height="42" align="right">
-</a>
---->
+# CampusPal (agent-first demo fork)
 
-# TUM Campus App - An Unofficial Guide Through University Life
+This repository is a **demo fork** of the open-source [TUM Campus Flutter app](https://github.com/TUM-Dev/campus_flutter).
 
-The TUM Campus App (TCA) is an open source project, developed by volunteers. This repository is dedicated to the development and transition to Flutter. 
+For this demo, we re-imagine the app for the **agentic era**:
 
-The application mostly targets phones, but can also be used on tablet and Macs. We currently support iOS, iPadOS, macOS and Android.
+- A voice agent (ElevenLabs “Eva”) is integrated directly into the app
+- The agent can **navigate** the app using whitelisted client tools (open screens, search, shortcuts)
+- A minimal local Node backend mints short-lived conversation tokens (keeps secrets off-device)
 
 ## Features
 
@@ -41,14 +34,11 @@ You're welcome to contribute to this app!
 Check out our detailed information at [CONTRIBUTING.md](https://github.com/TCA-Team/iOS/blob/master/CONTRIBUTING.md)!
 -->
 
-## Beta
-If you want to participate in the beta of this app, enter your details [here](https://testflight.apple.com/join/4Ddi6f2f) to get invited via TestFlight or [here](https://play.google.com/store/apps/details?id=de.tum.in.tumcampus) on your Android device or [here](https://play.google.com/apps/testing/de.tum.in.tumcampus) in your browser to get invited via the Google Play Beta Program. We would appreciate your feedback regarding bugs and improvement suggestions!
+## Upstream
 
-## Policies
-- [Privacy policy](https://app.tum.de/landing/privacy/)
+This is a demo fork. The official upstream project is maintained at:
 
-## Support
-You can reach us on [GitHub](https://github.com/TUM-Dev/campus_flutter) or via E-Mail [app@tum.de](mailto:app@tum.de)
+- https://github.com/TUM-Dev/campus_flutter
 
 ## Development
 
