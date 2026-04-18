@@ -22,12 +22,15 @@ class CalendarViewModel {
   final BehaviorSubject<(List<CalendarEvent>, List<CalendarEvent>)?>
   widgetEvents = BehaviorSubject.seeded(null);
 
-  Future fetch(bool forcedRefresh) async {
-    CalendarService.fetchCalendar(forcedRefresh).then((response) {
+  /// Returns `false` if loading failed (error is also sent on [events]).
+  Future<bool> fetch(bool forcedRefresh) async {
+    try {
+      final response = await CalendarService.fetchCalendar(forcedRefresh);
       lastFetched.add(response.$1);
-      response.$2.removeWhere((element) => element.isCanceled);
+      final updated = List<CalendarEvent>.from(response.$2);
+      updated.removeWhere((element) => element.isCanceled);
       getIt<CalendarPreferenceService>().loadPreferences();
-      for (var element in response.$2) {
+      for (final element in updated) {
         final eventColor = getIt<CalendarPreferenceService>()
             .getColorPreference(element.lvNr ?? element.id);
         if (eventColor != null) {
@@ -40,10 +43,14 @@ class CalendarViewModel {
           element.isVisible = eventVisibility;
         }
       }
-      events.add(response.$2);
-      updateHomeWidget(response.$2);
-      _syncToDeviceCalendar(response.$2);
-    }, onError: (error) => events.addError(error));
+      events.add(updated);
+      await updateHomeWidget(updated);
+      await _syncToDeviceCalendar(updated);
+      return true;
+    } catch (error, stackTrace) {
+      events.addError(error, stackTrace);
+      return false;
+    }
   }
 
   Future<void> updateHomeWidget(List<CalendarEvent> calendarEvents) async {
@@ -111,7 +118,8 @@ class CalendarViewModel {
   }
 
   Future<void> deleteCalendarElement(String id) async {
-    await CalendarService.deleteCalendarEvent(id).then((value) => fetch(true));
+    await CalendarService.deleteCalendarEvent(id);
+    await fetch(true);
   }
 
   void setEventColor(String key, Color color) {
