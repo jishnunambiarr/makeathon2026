@@ -59,6 +59,60 @@ Please refer to the respective installation instructions:
 |------------------------------------------|------------------------------------------|----------------------------------------------|
 | `Flutter` (includes the `Dart` compiler) | SDK to develop this app                  | https://docs.flutter.dev/get-started/install |
 
+## Local voice agent (ElevenLabs Eva) - Dev setup
+
+This repo includes a **hackathon/demo** voice agent integration:
+
+- Flutter client uses `elevenlabs_agents` to start a realtime session (WebRTC)
+- A small Node backend mints a short-lived conversation token (keeps `XI_API_KEY` off-device)
+- The agent can invoke **client tools** to navigate within the app (and optionally fetch limited read-only data)
+
+### Backend
+
+1. Create `backend/agent-server/.env` (do not commit it):
+
+```bash
+PORT=8787
+XI_API_KEY=...
+ELEVEN_AGENT_ID=agent_...
+```
+
+2. Run:
+
+```bash
+cd backend/agent-server
+npm install
+npm run dev
+```
+
+Health check: `GET http://127.0.0.1:8787/healthz`
+
+### Flutter
+
+Run with the backend URL:
+
+- Android emulator: `http://10.0.2.2:8787`
+- iOS simulator: `http://127.0.0.1:8787`
+
+Example:
+
+```bash
+flutter run --dart-define=AGENT_BACKEND_URL=http://10.0.2.2:8787
+```
+
+### Permissions
+
+- Android: `RECORD_AUDIO` (for voice)
+- iOS: `NSMicrophoneUsageDescription`
+
+### Tool calling
+
+To let Eva navigate the app, enable **client tools** in the ElevenLabs Agent settings and add tools like:
+
+- `navigate(route)`
+- `open_search(type, query, categoryTab)`
+- `trigger_shortcut(shortcutType)`
+
 ### Updating the `.proto` files
 
 To update the generated stubs for the Campus, you need protoc installed, then activte it in dart and then you can generate the new client
