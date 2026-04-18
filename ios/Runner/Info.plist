@@ -51,6 +51,8 @@
         <string>To sync your TUM calendar events with your device calendar</string>
         <key>NSContactsUsageDescription</key>
         <string>To save TUM contacts to your local contacts we need access to your contacts</string>
+        <key>NSMicrophoneUsageDescription</key>
+        <string>The campus voice assistant needs microphone access for real-time conversation</string>
         <key>UIApplicationSceneManifest</key>
         <dict>
             <key>UIApplicationSupportsMultipleScenes</key>

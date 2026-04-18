@@ -32,6 +32,9 @@ const campusMap = "$place/map";
 const cafeterias = "/cafeterias";
 const studyRooms = "/studyRooms";
 
+/// Agent tab
+const agent = "/agent";
+
 /// Settings
 const menuSettings = "/menu+settings";
 const feedback = "$menuSettings/feedback";
