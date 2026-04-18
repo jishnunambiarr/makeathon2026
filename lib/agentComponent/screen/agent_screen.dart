@@ -100,6 +100,8 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
           tts: TtsOverrides(useSpeakerBoost: true),
         ),
       );
+      // Ensure mic is published (some devices/emulators miss the first enable).
+      await _client.setMicMuted(false);
     } catch (e) {
       setState(() {
         _error = e.toString();
@@ -174,6 +176,31 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
                   fontSize: 12,
                 ),
                 textAlign: TextAlign.center,
+              ),
+            ],
+            if (connected && _client.isMuted) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Microphone is muted — the agent cannot hear you.',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.error,
+                  fontSize: 12,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              TextButton.icon(
+                onPressed: _busy
+                    ? null
+                    : () async {
+                        setState(() => _busy = true);
+                        try {
+                          await _client.setMicMuted(false);
+                        } finally {
+                          if (mounted) setState(() => _busy = false);
+                        }
+                      },
+                icon: const Icon(Icons.mic, size: 18),
+                label: const Text('Unmute microphone'),
               ),
             ],
             const SizedBox(height: 16),

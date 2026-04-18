@@ -50,7 +50,6 @@ Request:
 ```
 
 Tools implemented:
-- `get_next_events` `{ limit?: number }`
 - `get_my_courses` `{}`
 - `get_grades` `{}`
 - `search_rooms` `{ query: string }`

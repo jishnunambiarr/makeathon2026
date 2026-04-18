@@ -1,15 +1,8 @@
 import { z } from 'zod';
-import {
-  getNextEvents,
-  getGrades,
-  getMyCourses,
-} from './tumonline.js';
+import { getGrades, getMyCourses } from './tumonline.js';
 import { searchRooms } from './navigatum.js';
 
 const toolSchemas = {
-  get_next_events: z.object({
-    limit: z.number().int().min(1).max(30).default(5),
-  }),
   get_grades: z.object({}),
   get_my_courses: z.object({}),
   search_rooms: z.object({
@@ -24,8 +17,6 @@ export async function dispatchTool({ tumToken, tool, args }) {
   if (!parsed.success) throw new Error(`invalid_args: ${JSON.stringify(parsed.error.format())}`);
 
   switch (tool) {
-    case 'get_next_events':
-      return await getNextEvents({ tumToken, limit: parsed.data.limit });
     case 'get_grades':
       return await getGrades({ tumToken });
     case 'get_my_courses':
