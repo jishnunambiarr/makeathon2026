@@ -1,12 +1,12 @@
-import 'package:campus_flutter/agentComponent/model/agent_state.dart';
 import 'package:campus_flutter/agentComponent/services/agent_backend_service.dart';
 import 'package:campus_flutter/agentComponent/tools/agent_client_tools.dart';
 import 'package:campus_flutter/agentComponent/utils/agent_output_audio.dart';
-import 'package:campus_flutter/agentComponent/widgets/orb_widget.dart';
 import 'package:campus_flutter/main.dart';
+import 'package:campus_flutter/ui/coco_avatar.dart';
 import 'package:campus_flutter/ui/coco_overlay_service.dart';
 import 'package:elevenlabs_agents/elevenlabs_agents.dart';
 import 'package:flutter/material.dart';
+import 'package:rive/rive.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -89,19 +89,6 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
     _coco.outputAmplitude.value = _smoothedAmp;
   }
 
-  AgentState get _orbState {
-    switch (_client.status) {
-      case ConversationStatus.disconnected:
-      case ConversationStatus.disconnecting:
-        return AgentState.idle;
-      case ConversationStatus.connecting:
-        return AgentState.thinking;
-      case ConversationStatus.connected:
-        if (_client.isSpeaking) return AgentState.talking;
-        return AgentState.listening;
-    }
-  }
-
   @override
   void initState() {
     super.initState();
@@ -179,7 +166,8 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
       await _client.setMicMuted(false);
       if (mounted) {
         _coco.overlayExpanded.value = false;
-        _coco.visible.value = true;
+        // Avatar lives in this tab; keep global overlay off to avoid two Rive heads.
+        _coco.visible.value = false;
       }
     } catch (e) {
       setState(() {
@@ -212,7 +200,6 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
   @override
   Widget build(BuildContext context) {
     final connected = _connected;
-    final s = _orbState;
 
     return SafeArea(
       child: Padding(
@@ -388,8 +375,4 @@ class _StatusCard extends StatelessWidget {
       ),
     );
   }
-}
-
-extension on AgentState {
-  bool get isTalking => this == AgentState.talking;
 }
