@@ -1,3 +1,4 @@
+import 'package:campus_flutter/ui/coco_overlay_service.dart';
 import 'package:campus_flutter/base/enums/appearance.dart';
 import 'package:campus_flutter/base/enums/remote_config_message.dart';
 import 'package:campus_flutter/base/enums/shortcut_item.dart';
@@ -118,6 +119,7 @@ Future<void> _initializeServices() async {
   getIt.registerSingleton<CalendarSyncService>(
     CalendarSyncService(sharedPreferences),
   );
+  getIt.registerSingleton<CocoOverlayService>(CocoOverlayService.instance);
 }
 
 Future<bool> _initializeHomeWidgets() async {
@@ -168,6 +170,9 @@ class _CampusAppState extends ConsumerState<CampusApp> {
             shortcutItemType.shortcutItem(locale),
         ]);
         return locale;
+      },
+      builder: (context, child) {
+        return CocoOverlayService.instance.wrapWithOverlay(child);
       },
       routerConfig: ref.watch(routerProvider),
     );

@@ -1,11 +1,46 @@
 import 'package:campus_flutter/agentComponent/model/agent_state.dart';
 import 'package:campus_flutter/agentComponent/services/agent_backend_service.dart';
 import 'package:campus_flutter/agentComponent/tools/agent_client_tools.dart';
+import 'package:campus_flutter/agentComponent/utils/agent_output_audio.dart';
 import 'package:campus_flutter/agentComponent/widgets/orb_widget.dart';
+import 'package:campus_flutter/main.dart';
+import 'package:campus_flutter/ui/coco_overlay_service.dart';
 import 'package:elevenlabs_agents/elevenlabs_agents.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+/// Tool names that should **not** flip the avatar into "thinking" (e.g. fast greeting fetch).
+const _toolsWithoutThinkingIndicator = <String>{
+  'get_user_status',
+};
+
+/// Wraps a client tool to fire [onStart] when the agent invokes it (before execution).
+class _ThinkingHookTool implements ClientTool {
+  _ThinkingHookTool({required this.delegate, required this.onStart});
+
+  final ClientTool delegate;
+  final VoidCallback onStart;
+
+  @override
+  Future<ClientToolResult?> execute(Map<String, dynamic> parameters) async {
+    onStart();
+    return delegate.execute(parameters);
+  }
+}
+
+Map<String, ClientTool> _wrapToolsForThinkingHook({
+  required Map<String, ClientTool> tools,
+  required VoidCallback onToolStart,
+  Set<String> skipToolNames = _toolsWithoutThinkingIndicator,
+}) {
+  return {
+    for (final e in tools.entries)
+      e.key: skipToolNames.contains(e.key)
+          ? e.value
+          : _ThinkingHookTool(delegate: e.value, onStart: onToolStart),
+  };
+}
 
 /// Voice agent tab: ElevenLabs Eva via WebRTC (official SDK) + backend-minted token.
 class AgentScreen extends ConsumerStatefulWidget {
@@ -17,14 +52,65 @@ class AgentScreen extends ConsumerStatefulWidget {
 
 class _AgentScreenState extends ConsumerState<AgentScreen> {
   late final ConversationClient _client;
+  late final Map<String, ClientTool> _clientTools;
+
+  CocoOverlayService get _coco => getIt<CocoOverlayService>();
+
+  double _smoothedAmp = 0;
+  bool _lastSpeaking = false;
+
   String? _error;
   bool _busy = false;
+
+  void _onToolExecutionStart() {
+    if (!mounted) return;
+    _coco.thinking.value = true;
+  }
+
+  void _onClientChanged() {
+    final speaking = _client.isSpeaking;
+    _coco.agentSpeaking.value = speaking;
+    if (speaking && !_lastSpeaking) {
+      _coco.thinking.value = false;
+    }
+    _lastSpeaking = speaking;
+    if (!speaking) {
+      _smoothedAmp *= 0.88;
+      if (_smoothedAmp < 0.015) {
+        _smoothedAmp = 0;
+      }
+      _coco.outputAmplitude.value = _smoothedAmp;
+    }
+  }
+
+  void _onAgentAudioChunk(String base64Chunk) {
+    final instant = amplitudeFromAgentAudioBase64(base64Chunk);
+    _smoothedAmp = _smoothedAmp * 0.78 + instant * 0.22;
+    _coco.outputAmplitude.value = _smoothedAmp;
+  }
+
+  AgentState get _orbState {
+    switch (_client.status) {
+      case ConversationStatus.disconnected:
+      case ConversationStatus.disconnecting:
+        return AgentState.idle;
+      case ConversationStatus.connecting:
+        return AgentState.thinking;
+      case ConversationStatus.connected:
+        if (_client.isSpeaking) return AgentState.talking;
+        return AgentState.listening;
+    }
+  }
 
   @override
   void initState() {
     super.initState();
+    _clientTools = _wrapToolsForThinkingHook(
+      tools: AgentClientTools.build(ref: ref),
+      onToolStart: _onToolExecutionStart,
+    );
     _client = ConversationClient(
-      clientTools: AgentClientTools.build(ref: ref),
+      clientTools: _clientTools,
       callbacks: ConversationCallbacks(
         onConnect: ({required conversationId}) {
           setState(() {
@@ -48,29 +134,19 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
         onModeChange: ({required mode}) {
           setState(() {});
         },
+        onAudio: _onAgentAudioChunk,
       ),
-    )..addListener(() {
-        setState(() {});
-      });
+    )..addListener(_onClientChanged);
   }
 
   @override
   void dispose() {
+    _client.removeListener(_onClientChanged);
     _client.dispose();
+    _coco.visible.value = false;
+    _coco.resetOverlayPresentation();
+    _coco.outputAmplitude.value = 0;
     super.dispose();
-  }
-
-  AgentState get _orbState {
-    switch (_client.status) {
-      case ConversationStatus.disconnected:
-      case ConversationStatus.disconnecting:
-        return AgentState.idle;
-      case ConversationStatus.connecting:
-        return AgentState.thinking;
-      case ConversationStatus.connected:
-        if (_client.isSpeaking) return AgentState.talking;
-        return AgentState.listening;
-    }
   }
 
   bool get _connected =>
@@ -100,8 +176,11 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
           tts: TtsOverrides(useSpeakerBoost: true),
         ),
       );
-      // Ensure mic is published (some devices/emulators miss the first enable).
       await _client.setMicMuted(false);
+      if (mounted) {
+        _coco.overlayExpanded.value = false;
+        _coco.visible.value = true;
+      }
     } catch (e) {
       setState(() {
         _error = e.toString();
@@ -121,6 +200,10 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
       await _client.endSession();
     } finally {
       if (mounted) {
+        _coco.visible.value = false;
+        _coco.resetOverlayPresentation();
+        _smoothedAmp = 0;
+        _coco.outputAmplitude.value = 0;
         setState(() => _busy = false);
       }
     }
@@ -128,8 +211,8 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final s = _orbState;
     final connected = _connected;
+    final s = _orbState;
 
     return SafeArea(
       child: Padding(
