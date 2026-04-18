@@ -1,6 +1,7 @@
-import 'package:campus_flutter/ui/coco_avatar.dart';
 import 'package:flutter/material.dart';
-import 'package:rive/rive.dart';
+import 'package:rive/rive.dart' as rive;
+
+import 'package:campus_flutter/ui/coco_avatar.dart';
 
 /// Global floating Coco avatar layer, built once above the [Navigator] via
 /// [MaterialApp.builder]. Drive [outputAmplitude] / [thinking] from the agent
@@ -120,7 +121,7 @@ class _CocoFloatingHead extends StatelessWidget {
                         assetPath: CocoOverlayService.defaultAvatarRivAsset,
                         outputAmplitudeListenable: s.outputAmplitude,
                         thinkingListenable: s.thinking,
-                        fit: Fit.contain,
+                        fit: rive.Fit.contain,
                       ),
                     ),
                   ),

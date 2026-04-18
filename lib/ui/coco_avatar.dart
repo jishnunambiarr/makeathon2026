@@ -1,7 +1,27 @@
+import 'dart:async' show Completer;
+
 import 'dart:ui' show lerpDouble;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:rive/rive.dart';
+import 'package:flutter/services.dart' show AssetBundle, rootBundle;
+import 'package:rive/rive.dart' as rive;
+
+/// Avoid overlapping [rive.File.decode] calls — a second parallel load on iOS
+/// can fail while the Agent tab’s avatar succeeds.
+Future<void> _decodeSerial = Future<void>.value();
+
+Future<T> _serializedRiveDecode<T>(Future<T> Function() work) async {
+  final previous = _decodeSerial;
+  final done = Completer<void>();
+  _decodeSerial = done.future;
+  await previous;
+  try {
+    return await work();
+  } finally {
+    if (!done.isCompleted) done.complete();
+  }
+}
 
 /// Avatar driven by a Rive state machine.
 ///
@@ -22,7 +42,7 @@ class CocoAvatar extends StatefulWidget {
     super.key,
     required this.assetPath,
     this.stateMachineName = 'MainState',
-    this.fit = Fit.contain,
+    this.fit = rive.Fit.contain,
     this.alignment = Alignment.center,
     this.outputAmplitudeListenable,
     this.thinkingListenable,
@@ -34,7 +54,7 @@ class CocoAvatar extends StatefulWidget {
   /// Must match the state machine name in the Rive editor.
   final String stateMachineName;
 
-  final Fit fit;
+  final rive.Fit fit;
   final Alignment alignment;
 
   /// Real-time agent output level (0.0–1.0), e.g. from ElevenLabs [ConversationCallbacks.onAudio].
@@ -52,11 +72,12 @@ class CocoAvatarState extends State<CocoAvatar> {
   /// Higher = snappier; lower = smoother, less flicker.
   static const double _kAmplitudeSmoothing = 0.22;
 
-  File? _file;
-  RiveWidgetController? _riveController;
-  NumberInput? _audioLevelInput;
-  BooleanInput? _thinkingInput;
+  rive.File? _file;
+  rive.RiveWidgetController? _riveController;
+  rive.NumberInput? _audioLevelInput;
+  rive.BooleanInput? _thinkingInput;
   Object? _loadError;
+  int _loadAttempts = 0;
 
   /// Low-pass filtered level applied to Rive (updated via lerp in [updateAmplitude]).
   double _smoothedAmplitude = 0;
@@ -87,7 +108,18 @@ class CocoAvatarState extends State<CocoAvatar> {
   @override
   void initState() {
     super.initState();
-    _load();
+    // Wait for inherited [DefaultAssetBundle]; parallel [initState] loads can
+    // race on some devices when using [rive.File.asset] from a cold start.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _startLoad();
+    });
+  }
+
+  void _startLoad() {
+    if (!mounted) return;
+    final bundle = DefaultAssetBundle.of(context);
+    _load(bundle: bundle);
   }
 
   @override
@@ -103,19 +135,23 @@ class CocoAvatarState extends State<CocoAvatar> {
     }
   }
 
-  Future<void> _load() async {
+  Future<void> _load({required AssetBundle bundle}) async {
     try {
-      final file = await File.asset(
-        widget.assetPath,
-        riveFactory: Factory.rive,
-      );
-      if (file == null) {
-        throw StateError('Failed to load Rive asset: ${widget.assetPath}');
-      }
+      final file = await _serializedRiveDecode(() async {
+        final f = await rive.File.asset(
+          widget.assetPath,
+          riveFactory: rive.Factory.rive,
+          bundle: bundle,
+        );
+        if (f == null) {
+          throw StateError('Failed to load Rive asset: ${widget.assetPath}');
+        }
+        return f;
+      });
 
-      final controller = RiveWidgetController(
+      final controller = rive.RiveWidgetController(
         file,
-        stateMachineSelector: StateMachineNamed(widget.stateMachineName),
+        stateMachineSelector: rive.StateMachineNamed(widget.stateMachineName),
       );
 
       // ignore: deprecated_member_use — state machine inputs; Data Binding optional upgrade later
@@ -137,6 +173,13 @@ class CocoAvatarState extends State<CocoAvatar> {
     } catch (e, st) {
       debugPrint('CocoAvatar load failed: $e\n$st');
       if (!mounted) return;
+      if (_loadAttempts < 1) {
+        _loadAttempts++;
+        await Future<void>.delayed(const Duration(milliseconds: 180));
+        if (!mounted) return;
+        await _load(bundle: rootBundle);
+        return;
+      }
       setState(() => _loadError = e);
     }
   }
@@ -182,10 +225,35 @@ class CocoAvatarState extends State<CocoAvatar> {
   @override
   Widget build(BuildContext context) {
     if (_loadError != null) {
+      final cs = Theme.of(context).colorScheme;
       return Center(
-        child: Icon(
-          Icons.broken_image_outlined,
-          color: Theme.of(context).colorScheme.error,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            setState(() {
+              _loadError = null;
+              _loadAttempts = 0;
+            });
+            _startLoad();
+          },
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.refresh_rounded,
+                size: 28,
+                color: cs.onSurfaceVariant.withValues(alpha: 0.7),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Tap to load avatar',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: cs.onSurfaceVariant,
+                    ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -193,7 +261,7 @@ class CocoAvatarState extends State<CocoAvatar> {
     if (controller == null) {
       return const Center(child: CircularProgressIndicator());
     }
-    return RiveWidget(
+    return rive.RiveWidget(
       controller: controller,
       fit: widget.fit,
       alignment: widget.alignment,
