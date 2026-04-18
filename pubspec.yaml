@@ -71,6 +71,9 @@ dependencies:
   map_launcher: ^4.0.0
   html: ^0.15.4
 
+  # conversational AI (ElevenLabs Agents, WebRTC via LiveKit)
+  elevenlabs_agents: ^0.5.1
+
   # firebase
   firebase_crashlytics: ^5.0.0
   firebase_core: ^4.0.0

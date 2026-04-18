@@ -101,8 +101,8 @@ class _OrbPainter extends CustomPainter {
       ..blendMode = BlendMode.screen
       ..shader = RadialGradient(
         colors: [
-          color1.withOpacity(isDark ? 0.35 : 0.25),
-          color2.withOpacity(isDark ? 0.18 : 0.12),
+          color1.withValues(alpha: isDark ? 0.35 : 0.25),
+          color2.withValues(alpha: isDark ? 0.18 : 0.12),
           Colors.transparent,
         ],
         stops: const [0.0, 0.45, 1.0],
@@ -131,7 +131,7 @@ class _OrbPainter extends CustomPainter {
       ..blendMode = BlendMode.screen
       ..shader = RadialGradient(
         colors: [
-          Colors.white.withOpacity(isDark ? 0.16 : 0.22),
+          Colors.white.withValues(alpha: isDark ? 0.16 : 0.22),
           Colors.transparent,
         ],
         stops: const [0.0, 1.0],
@@ -146,7 +146,7 @@ class _OrbPainter extends CustomPainter {
     final ringPaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = ringWidth
-      ..color = Colors.white.withOpacity(isDark ? 0.18 : 0.14)
+      ..color = Colors.white.withValues(alpha: isDark ? 0.18 : 0.14)
       ..maskFilter = MaskFilter.blur(BlurStyle.normal, ringWidth * 0.75);
     canvas.drawCircle(Offset.zero, ringR, ringPaint);
 
