@@ -14,6 +14,11 @@ class CocoOverlayService {
   /// When true, shows the floating avatar above route transitions.
   final ValueNotifier<bool> visible = ValueNotifier<bool>(false);
 
+  /// Voice session is active (ElevenLabs connected). Used with shell tab index
+  /// so the big avatar stays on the Agent tab and the floating head appears
+  /// on other tabs.
+  final ValueNotifier<bool> voiceSessionActive = ValueNotifier<bool>(false);
+
   /// Wire these from your voice session (same as [CocoAvatar] listenables).
   final ValueNotifier<double> outputAmplitude = ValueNotifier<double>(0);
   final ValueNotifier<bool> thinking = ValueNotifier<bool>(false);
@@ -43,6 +48,7 @@ class CocoOverlayService {
     agentSpeaking.value = false;
     overlayExpanded.value = false;
     thinking.value = false;
+    voiceSessionActive.value = false;
   }
 
   /// Paints [child] (the router / navigator subtree) under a global overlay [Stack].
