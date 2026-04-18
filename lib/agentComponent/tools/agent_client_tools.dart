@@ -31,6 +31,7 @@ class AgentClientTools {
   static const String toolGetCafeteriaMenu = 'get_cafeteria_menu';
   static const String toolGetDepartures = 'get_departures';
   static const String toolGetStudyRooms = 'get_study_rooms';
+  static const String toolGetFreeStudyRooms = 'get_free_study_rooms';
   static const String toolSearchRooms = 'search_rooms';
 
   static const String toolGetScheduleRange = 'get_schedule_range';
@@ -74,6 +75,7 @@ class AgentClientTools {
       toolGetCafeteriaMenu: _GetCafeteriaMenuTool(),
       toolGetDepartures: _GetDeparturesTool(),
       toolGetStudyRooms: _GetStudyRoomsTool(),
+      toolGetFreeStudyRooms: _GetFreeStudyRoomsTool(),
       toolSearchRooms: _SearchRoomsTool(),
 
       toolGetScheduleRange: _RequireLoginTool(
@@ -256,6 +258,41 @@ class _GetStudyRoomsTool implements ClientTool {
 
     return ClientToolResult.success({
       'count': items.length,
+      'rooms': items,
+    });
+  }
+}
+
+/// Rooms that are currently free (or below utilization threshold per [StudyRoom.isAvailable]).
+class _GetFreeStudyRoomsTool implements ClientTool {
+  @override
+  Future<ClientToolResult?> execute(Map<String, dynamic> parameters) async {
+    final limit = _asInt(parameters['limit'], defaultValue: 20, min: 1, max: 40);
+    final (_, data) = await StudyRoomsService.fetchStudyRooms(false);
+
+    final free = (data.rooms ?? []).where((r) => r.isAvailable).toList();
+    free.sort((a, b) {
+      final byBuilding = (a.buildingName ?? '').compareTo(b.buildingName ?? '');
+      if (byBuilding != 0) return byBuilding;
+      return (a.name ?? '').compareTo(b.name ?? '');
+    });
+
+    final totalFree = free.length;
+    final items = free.take(limit).map((r) {
+      return {
+        'id': r.id,
+        'name': r.name,
+        'building': r.buildingName,
+        'buildingCode': r.buildingCode,
+        'status': r.status,
+        'percent': r.percent,
+        'occupiedUntil': r.occupiedUntil?.toIso8601String(),
+      };
+    }).toList();
+
+    return ClientToolResult.success({
+      'totalFree': totalFree,
+      'returned': items.length,
       'rooms': items,
     });
   }
