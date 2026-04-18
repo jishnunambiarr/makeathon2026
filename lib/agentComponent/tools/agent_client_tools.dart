@@ -4,6 +4,7 @@ import 'package:campus_flutter/base/enums/search_type.dart';
 import 'package:campus_flutter/base/networking/protocols/api.dart';
 import 'package:campus_flutter/base/routing/router.dart';
 import 'package:campus_flutter/base/routing/routes.dart' as routes;
+import 'package:campus_flutter/calendarComponent/views/calendars_view.dart';
 import 'package:campus_flutter/campusComponent/service/news_service.dart';
 import 'package:campus_flutter/calendarComponent/viewModels/calendar_viewmodel.dart';
 import 'package:campus_flutter/homeComponent/service/departures_service.dart';
@@ -18,6 +19,7 @@ import 'package:campus_flutter/studiesComponent/service/grade_service.dart';
 import 'package:campus_flutter/studiesComponent/service/lecture_service.dart';
 import 'package:elevenlabs_agents/elevenlabs_agents.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:syncfusion_flutter_calendar/calendar.dart';
 
 /// Minimal, whitelisted tool surface for the in-app ElevenLabs agent.
 ///
@@ -30,6 +32,7 @@ class AgentClientTools {
   static const String toolSearchRooms = 'search_rooms';
 
   static const String toolGetNextEvents = 'get_next_events';
+  static const String toolGetScheduleRange = 'get_schedule_range';
   static const String toolGetMyCourses = 'get_my_courses';
   static const String toolGetGrades = 'get_grades';
 
@@ -38,6 +41,7 @@ class AgentClientTools {
   static const String toolTriggerShortcut = 'trigger_shortcut';
   static const String toolOpenPersonDetails = 'open_person_details';
   static const String toolOpenNavigaTumRoom = 'open_navigatum_room';
+  static const String toolFocusCalendarRange = 'focus_calendar_range';
 
   /// Strictly allowed destinations for `navigate`.
   static const Set<String> allowedRoutes = {
@@ -73,6 +77,9 @@ class AgentClientTools {
       toolGetNextEvents: _RequireLoginTool(
         delegate: _GetNextEventsTool(ref: ref),
       ),
+      toolGetScheduleRange: _RequireLoginTool(
+        delegate: _GetScheduleRangeTool(ref: ref),
+      ),
       toolGetMyCourses: _RequireLoginTool(delegate: _GetMyCoursesTool()),
       toolGetGrades: _RequireLoginTool(delegate: _GetGradesTool()),
 
@@ -81,6 +88,7 @@ class AgentClientTools {
       toolTriggerShortcut: _TriggerShortcutTool(ref: ref),
       toolOpenPersonDetails: _OpenPersonDetailsTool(ref: ref),
       toolOpenNavigaTumRoom: _OpenNavigaTumRoomTool(ref: ref),
+      toolFocusCalendarRange: _FocusCalendarRangeTool(ref: ref),
     };
   }
 }
@@ -324,6 +332,107 @@ class _GetNextEventsTool implements ClientTool {
   }
 }
 
+class _GetScheduleRangeTool implements ClientTool {
+  final WidgetRef ref;
+  _GetScheduleRangeTool({required this.ref});
+
+  @override
+  Future<ClientToolResult?> execute(Map<String, dynamic> parameters) async {
+    final range = (_asString(parameters['range']) ?? 'next_week').trim().toLowerCase();
+    final includeEmptyDays = _asBool(parameters['includeEmptyDays'], defaultValue: true);
+    final maxEventsPerDay = _asInt(
+      parameters['maxEventsPerDay'],
+      defaultValue: 12,
+      min: 1,
+      max: 50,
+    );
+
+    final parsed = _resolveRange(range, parameters);
+    if (parsed == null) {
+      return ClientToolResult.failure(
+        'Invalid range. Use one of: today, tomorrow, this_week, next_week, next_7_days, date_range.',
+      );
+    }
+    final (start, end, resolvedRange) = parsed;
+
+    final vm = ref.read(calendarViewModel);
+    await vm.fetch(false);
+    final events = vm.events.value ?? const [];
+    final showHidden = ref.read(showHiddenCalendarEntries);
+
+    final filtered = events
+        .where(
+          (e) =>
+              !e.isCanceled &&
+              (showHidden ? true : (e.isVisible ?? true)) &&
+              !_day(e.endDate).isBefore(start) &&
+              !_day(e.startDate).isAfter(end),
+        )
+        .toList()
+      ..sort((a, b) => a.startDate.compareTo(b.startDate));
+
+    final byDay = <String, List<Map<String, dynamic>>>{};
+    for (final event in filtered) {
+      final eventDay = _day(event.startDate);
+      if (eventDay.isBefore(start) || eventDay.isAfter(end)) continue;
+      final key = _isoDate(eventDay);
+      byDay.putIfAbsent(key, () => <Map<String, dynamic>>[]);
+      if (byDay[key]!.length >= maxEventsPerDay) continue;
+      byDay[key]!.add({
+        'id': event.id,
+        'title': event.title ?? 'Untitled event',
+        'from': event.startDate.toIso8601String(),
+        'to': event.endDate.toIso8601String(),
+        'locations': event.locations,
+        'durationMinutes': event.duration.inMinutes,
+      });
+    }
+
+    final days = <Map<String, dynamic>>[];
+    DateTime cursor = start;
+    while (!cursor.isAfter(end)) {
+      final key = _isoDate(cursor);
+      final items = byDay[key] ?? <Map<String, dynamic>>[];
+      if (includeEmptyDays || items.isNotEmpty) {
+        days.add({
+          'date': key,
+          'weekday': cursor.weekday,
+          'eventCount': items.length,
+          'events': items,
+          'isEmptyDay': items.isEmpty,
+        });
+      }
+      cursor = cursor.add(const Duration(days: 1));
+    }
+
+    final busiest = days.fold<Map<String, dynamic>?>(
+      null,
+      (acc, day) {
+        if (acc == null) return day;
+        return (day['eventCount'] as int) > (acc['eventCount'] as int) ? day : acc;
+      },
+    );
+    final totalEvents = days.fold<int>(0, (sum, day) => sum + (day['eventCount'] as int));
+    final freeDays = days.where((d) => d['isEmptyDay'] == true).map((d) => d['date']).toList();
+
+    return ClientToolResult.success({
+      'range': resolvedRange,
+      'from': start.toIso8601String(),
+      'to': end.toIso8601String(),
+      'totalDays': days.length,
+      'totalEvents': totalEvents,
+      'freeDays': freeDays,
+      'busiestDay': busiest == null
+          ? null
+          : {
+              'date': busiest['date'],
+              'eventCount': busiest['eventCount'],
+            },
+      'days': days,
+    });
+  }
+}
+
 class _GetMyCoursesTool implements ClientTool {
   @override
   Future<ClientToolResult?> execute(Map<String, dynamic> parameters) async {
@@ -497,6 +606,88 @@ class _OpenNavigaTumRoomTool implements ClientTool {
     }
     ref.read(routerProvider).push(routes.navigaTum, extra: id.trim());
     return ClientToolResult.success({'opened': routes.navigaTum, 'id': id.trim()});
+  }
+}
+
+class _FocusCalendarRangeTool implements ClientTool {
+  final WidgetRef ref;
+  _FocusCalendarRangeTool({required this.ref});
+
+  @override
+  Future<ClientToolResult?> execute(Map<String, dynamic> parameters) async {
+    final range = (_asString(parameters['range']) ?? 'next_week').trim().toLowerCase();
+    final viewStr = (_asString(parameters['view']) ?? '').trim().toLowerCase();
+    final dateParam = _asString(parameters['date']);
+
+    DateTime anchor = _day(DateTime.now());
+    final parsedDate = _parseDateOnly(dateParam);
+    if (parsedDate != null) {
+      anchor = parsedDate;
+    } else {
+      final parsed = _resolveRange(range, parameters);
+      if (parsed != null) {
+        anchor = parsed.$1;
+      }
+    }
+
+    final CalendarView view = switch (viewStr) {
+      'day' => CalendarView.day,
+      'month' => CalendarView.month,
+      _ => (range.contains('week') || range == 'next_7_days')
+          ? CalendarView.week
+          : CalendarView.day,
+    };
+
+    ref.read(routerProvider).go(routes.calendar);
+    ref.read(selectedDate.notifier).state = (anchor, view);
+    return ClientToolResult.success({
+      'focused': routes.calendar,
+      'date': anchor.toIso8601String(),
+      'view': view.name,
+    });
+  }
+}
+
+String _isoDate(DateTime d) => '${d.year.toString().padLeft(4, '0')}-'
+    '${d.month.toString().padLeft(2, '0')}-'
+    '${d.day.toString().padLeft(2, '0')}';
+
+DateTime _day(DateTime d) => DateTime(d.year, d.month, d.day);
+
+DateTime _weekStart(DateTime d) => _day(d).subtract(Duration(days: d.weekday - DateTime.monday));
+
+DateTime? _parseDateOnly(String? input) {
+  if (input == null || input.trim().isEmpty) return null;
+  final parsed = DateTime.tryParse(input.trim());
+  if (parsed == null) return null;
+  return _day(parsed);
+}
+
+(DateTime, DateTime, String)? _resolveRange(String range, Map<String, dynamic> parameters) {
+  final now = _day(DateTime.now());
+  switch (range) {
+    case 'today':
+      return (now, now, range);
+    case 'tomorrow':
+      final t = now.add(const Duration(days: 1));
+      return (t, t, range);
+    case 'this_week':
+      final start = _weekStart(now);
+      return (start, start.add(const Duration(days: 6)), range);
+    case 'next_week':
+      final start = _weekStart(now).add(const Duration(days: 7));
+      return (start, start.add(const Duration(days: 6)), range);
+    case 'next_7_days':
+      return (now, now.add(const Duration(days: 6)), range);
+    case 'date_range':
+      final from = _parseDateOnly(_asString(parameters['from']));
+      final to = _parseDateOnly(_asString(parameters['to']));
+      if (from == null || to == null) return null;
+      final start = from.isBefore(to) ? from : to;
+      final end = from.isBefore(to) ? to : from;
+      return (start, end, range);
+    default:
+      return null;
   }
 }
 

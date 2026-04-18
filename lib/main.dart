@@ -39,6 +39,10 @@ final appearance = StateProvider<Appearance>((ref) => Appearance.system);
 final hasStatusMessage = StateProvider<(bool, RemoteConfigMessage?)>(
   (ref) => (false, null),
 );
+const bool disableFirebase = bool.fromEnvironment(
+  'DISABLE_FIREBASE',
+  defaultValue: true,
+);
 
 Future<void> main() async {
   WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
@@ -68,6 +72,7 @@ Future<void> _initializeLocalization() async {
 }
 
 Future<void> _initializeFirebase() async {
+  if (disableFirebase) return;
   if (!kDebugMode) {
     await Firebase.initializeApp();
     FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
@@ -169,6 +174,7 @@ class _CampusAppState extends ConsumerState<CampusApp> {
   }
 
   void firebaseCallback() {
+    if (disableFirebase) return;
     if (!kDebugMode) {
       final remoteConfig = FirebaseRemoteConfig.instance;
       remoteConfig.fetchAndActivate().then((value) {
