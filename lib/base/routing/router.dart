@@ -14,6 +14,7 @@ import 'package:campus_flutter/homeComponent/view/departure/departures_details_v
 import 'package:campus_flutter/feedbackComponent/views/feedback_form_view.dart';
 import 'package:campus_flutter/feedbackComponent/views/feedback_success_view.dart';
 import 'package:campus_flutter/homeComponent/screen/home_screen.dart';
+import 'package:campus_flutter/agentComponent/screen/agent_screen.dart';
 import 'package:campus_flutter/navigaTumComponent/model/navigatum_roomfinder_map.dart';
 import 'package:campus_flutter/navigaTumComponent/views/navigatum_room_view.dart';
 import 'package:campus_flutter/onboardingComponent/views/confirm_view.dart';
@@ -103,6 +104,15 @@ final _router = GoRouter(
               path: places,
               pageBuilder: (context, state) =>
                   const NoTransitionPage(child: PlacesScreen()),
+            ),
+          ],
+        ),
+        StatefulShellBranch(
+          routes: [
+            GoRoute(
+              path: agent,
+              pageBuilder: (context, state) =>
+                  const NoTransitionPage(child: AgentScreen()),
             ),
           ],
         ),

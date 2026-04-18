@@ -57,6 +57,11 @@ class NavigationService {
           context.tr("places"),
           style: Theme.of(context).textTheme.titleLarge,
         );
+      case 5:
+        return Text(
+          "Agent",
+          style: Theme.of(context).textTheme.titleLarge,
+        );
       default:
         return Image.asset(
           'assets/images/logos/tum-logo-blue.png',
@@ -172,6 +177,11 @@ class NavigationService {
           icon: const Icon(Icons.place_outlined),
           selectedIcon: const Icon(Icons.place),
           label: context.tr("places"),
+        ),
+        const NavigationDestination(
+          icon: Icon(Icons.auto_awesome_outlined),
+          selectedIcon: Icon(Icons.auto_awesome),
+          label: "Agent",
         ),
       ];
 
