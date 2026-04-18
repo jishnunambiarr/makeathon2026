@@ -7,7 +7,6 @@ import 'package:campus_flutter/base/routing/routes.dart' as routes;
 import 'package:campus_flutter/calendarComponent/views/calendars_view.dart';
 import 'package:campus_flutter/campusComponent/service/news_service.dart';
 import 'package:campus_flutter/calendarComponent/model/calendar_editing.dart';
-import 'package:campus_flutter/calendarComponent/model/calendar_event.dart';
 import 'package:campus_flutter/calendarComponent/services/calendar_service.dart';
 import 'package:campus_flutter/calendarComponent/viewModels/calendar_viewmodel.dart';
 import 'package:campus_flutter/homeComponent/service/departures_service.dart';
@@ -34,7 +33,6 @@ class AgentClientTools {
   static const String toolGetStudyRooms = 'get_study_rooms';
   static const String toolSearchRooms = 'search_rooms';
 
-  static const String toolGetNextEvents = 'get_next_events';
   static const String toolGetScheduleRange = 'get_schedule_range';
   static const String toolCreateCalendarEvent = 'create_calendar_event';
   static const String toolGetMyCourses = 'get_my_courses';
@@ -78,9 +76,6 @@ class AgentClientTools {
       toolGetStudyRooms: _GetStudyRoomsTool(),
       toolSearchRooms: _SearchRoomsTool(),
 
-      toolGetNextEvents: _RequireLoginTool(
-        delegate: _GetNextEventsTool(ref: ref),
-      ),
       toolGetScheduleRange: _RequireLoginTool(
         delegate: _GetScheduleRangeTool(ref: ref),
       ),
@@ -296,110 +291,6 @@ class _SearchRoomsTool implements ClientTool {
       'count': entities.length,
       'results': entities,
     });
-  }
-}
-
-class _GetNextEventsTool implements ClientTool {
-  final WidgetRef ref;
-  _GetNextEventsTool({required this.ref});
-
-  @override
-  Future<ClientToolResult?> execute(Map<String, dynamic> parameters) async {
-    final limit = _asInt(parameters['limit'], defaultValue: 5, min: 1, max: 30);
-
-    final vm = ref.read(calendarViewModel);
-    final loaded = await vm.fetch(true);
-    if (!loaded) {
-      return ClientToolResult.failure(
-        'Could not load calendar. Check login and network.',
-      );
-    }
-
-    final events = vm.events.value ?? const <CalendarEvent>[];
-    final now = DateTime.now();
-    final showHidden = ref.read(showHiddenCalendarEntries);
-
-    final fromStr = _asString(parameters['from']);
-    final toStr = _asString(parameters['to']);
-    final List<CalendarEvent> filtered;
-
-    if (fromStr != null &&
-        fromStr.trim().isNotEmpty &&
-        toStr != null &&
-        toStr.trim().isNotEmpty) {
-      late DateTime rangeStart;
-      late DateTime rangeEnd;
-      try {
-        rangeStart = DateTime.parse(fromStr.trim());
-        rangeEnd = DateTime.parse(toStr.trim());
-      } catch (_) {
-        return ClientToolResult.failure(
-          'Invalid "from" / "to". Use ISO-8601 datetimes.',
-        );
-      }
-      if (!rangeEnd.isAfter(rangeStart)) {
-        return ClientToolResult.failure('Range "to" must be after "from".');
-      }
-      filtered = events
-          .where(
-            (e) =>
-                _calendarEventVisible(e, showHidden) &&
-                _eventOverlapsRange(e, rangeStart, rangeEnd),
-          )
-          .toList();
-    } else {
-      final window =
-          (_asString(parameters['window']) ?? 'upcoming').toLowerCase();
-      switch (window) {
-        case 'today':
-          final start = _day(now);
-          final end = _day(now).add(const Duration(days: 1));
-          filtered = events
-              .where(
-                (e) =>
-                    _calendarEventVisible(e, showHidden) &&
-                    _eventOverlapsRange(e, start, end),
-              )
-              .toList();
-          break;
-        case 'rest_of_today':
-          final start = _day(now);
-          final end = _day(now).add(const Duration(days: 1));
-          filtered = events
-              .where(
-                (e) =>
-                    _calendarEventVisible(e, showHidden) &&
-                    _eventOverlapsRange(e, start, end) &&
-                    e.endDate.isAfter(now),
-              )
-              .toList();
-          break;
-        case 'upcoming':
-        default:
-          filtered = events
-              .where(
-                (e) =>
-                    _calendarEventVisible(e, showHidden) &&
-                    e.endDate.isAfter(now),
-              )
-              .toList();
-          break;
-      }
-    }
-
-    filtered.sort((a, b) => a.startDate.compareTo(b.startDate));
-
-    final items = filtered.take(limit).map((e) {
-      return {
-        'id': e.id,
-        'title': e.title,
-        'from': e.startDate.toIso8601String(),
-        'to': e.endDate.toIso8601String(),
-        'locations': e.locations,
-      };
-    }).toList();
-
-    return ClientToolResult.success({'count': items.length, 'events': items});
   }
 }
 
@@ -793,14 +684,6 @@ class _FocusCalendarRangeTool implements ClientTool {
       'view': view.name,
     });
   }
-}
-
-bool _calendarEventVisible(CalendarEvent e, bool showHidden) {
-  return !e.isCanceled && (showHidden || (e.isVisible ?? true));
-}
-
-bool _eventOverlapsRange(CalendarEvent e, DateTime start, DateTime end) {
-  return e.startDate.isBefore(end) && e.endDate.isAfter(start);
 }
 
 String _isoDate(DateTime d) => '${d.year.toString().padLeft(4, '0')}-'

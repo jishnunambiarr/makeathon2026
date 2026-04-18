@@ -36,10 +36,3 @@ export async function getMyCourses({ tumToken }) {
   return await fetchXml('wbservicesbasic.veranstaltungenEigene', { pToken: tumToken });
 }
 
-export async function getNextEvents({ tumToken, limit }) {
-  // wbservicesbasic.kalender supports various params; we keep it simple here.
-  // If needed, add pAnzahl / date window after verifying the API contract.
-  const res = await fetchXml('wbservicesbasic.kalender', { pToken: tumToken });
-  return { ...res, hint: { limit } };
-}
-
