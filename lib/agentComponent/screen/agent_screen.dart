@@ -96,6 +96,9 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
       await _client.startSession(
         conversationToken: token,
         userId: AgentBackendService.defaultUserId(),
+        overrides: ConversationOverrides(
+          tts: TtsOverrides(useSpeakerBoost: true),
+        ),
       );
     } catch (e) {
       setState(() {
