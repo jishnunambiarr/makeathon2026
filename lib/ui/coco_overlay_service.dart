@@ -9,6 +9,11 @@ class CocoOverlayService {
   CocoOverlayService._();
   static final CocoOverlayService instance = CocoOverlayService._();
 
+  /// Default Rive bundle for the voice avatar; must stay in sync with `pubspec.yaml`
+  /// and [CocoAvatar] (state machine `MainState`, inputs `audioLevel` / `thinking`).
+  static const String defaultAvatarRivAsset =
+      'assets/rive/554-1038-my-avatar.riv';
+
   bool _didInit = false;
 
   /// When true, shows the floating avatar above route transitions.
@@ -45,10 +50,12 @@ class CocoOverlayService {
   }
 
   void resetOverlayPresentation() {
+    visible.value = false;
     agentSpeaking.value = false;
     overlayExpanded.value = false;
     thinking.value = false;
     voiceSessionActive.value = false;
+    outputAmplitude.value = 0;
   }
 
   /// Paints [child] (the router / navigator subtree) under a global overlay [Stack].
@@ -110,7 +117,7 @@ class _CocoFloatingHead extends StatelessWidget {
                       curve: Curves.easeOut,
                       opacity: opacity,
                       child: CocoAvatar(
-                        assetPath: 'assets/rive/554-1038-my-avatar.riv',
+                        assetPath: CocoOverlayService.defaultAvatarRivAsset,
                         outputAmplitudeListenable: s.outputAmplitude,
                         thinkingListenable: s.thinking,
                         fit: Fit.contain,
