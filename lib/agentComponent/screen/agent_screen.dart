@@ -130,9 +130,7 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
   void dispose() {
     _client.removeListener(_onClientChanged);
     _client.dispose();
-    _coco.visible.value = false;
     _coco.resetOverlayPresentation();
-    _coco.outputAmplitude.value = 0;
     super.dispose();
   }
 
@@ -187,10 +185,8 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
       await _client.endSession();
     } finally {
       if (mounted) {
-        _coco.visible.value = false;
         _coco.resetOverlayPresentation();
         _smoothedAmp = 0;
-        _coco.outputAmplitude.value = 0;
         setState(() => _busy = false);
       }
     }
@@ -214,7 +210,7 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
                     children: [
                       Positioned.fill(
                         child: CocoAvatar(
-                          assetPath: 'assets/rive/554-1038-my-avatar.riv',
+                          assetPath: CocoOverlayService.defaultAvatarRivAsset,
                           outputAmplitudeListenable: _coco.outputAmplitude,
                           thinkingListenable: _coco.thinking,
                           fit: Fit.contain,
