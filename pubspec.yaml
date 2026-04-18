@@ -45,6 +45,7 @@ dependencies:
   video_player: ^2.6.1
   barcode_widget: ^2.0.4
   lottie: ^3.0.0
+  rive: ^0.14.5
   timeago: ^3.4.0
   flutter_colorpicker:
     git:
@@ -119,6 +120,7 @@ flutter:
   assets:
     - assets/translations/
     - assets/mapStyles/
+    - assets/rive/
     - assets/images/logos/tum-logo-blue.png
     - assets/images/logos/tum-logo-white.png
     - assets/images/logos/tum-logo-blue-text.png
