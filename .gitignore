@@ -56,3 +56,5 @@ bugreport-*.zip
 
 #iOS
 ios/.derived*
+
+node_modules/
