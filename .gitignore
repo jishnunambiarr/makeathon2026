@@ -34,6 +34,12 @@ migrate_working_dir/
 .pub/
 /build/
 
+# Backend secrets / deps
+**/.env
+**/node_modules/
+**/.moodle-storage.json
+**/downloads/
+
 # Symbolication related
 app.*.symbols
 

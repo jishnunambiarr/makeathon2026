@@ -49,42 +49,38 @@ Please refer to the respective installation instructions:
 |------------------------------------------|------------------------------------------|----------------------------------------------|
 | `Flutter` (includes the `Dart` compiler) | SDK to develop this app                  | https://docs.flutter.dev/get-started/install |
 
-## Local voice agent (ElevenLabs Eva) - Dev setup
+## Local voice agent (ElevenLabs) – dev setup
 
 This repo includes a **hackathon/demo** voice agent integration:
 
-- Flutter client uses `elevenlabs_agents` to start a realtime session (WebRTC)
-- A small Node backend mints a short-lived conversation token (keeps `XI_API_KEY` off-device)
-- The agent can invoke **client tools** to navigate within the app (and optionally fetch limited read-only data)
+- Flutter uses `elevenlabs_agents` for a realtime session (WebRTC)
+- A small Node backend mints short-lived conversation tokens (keeps `XI_API_KEY` off-device)
+- The model invokes **client tools** that run **inside the app** (navigation, calendar, search, …)
 
-### Backend
+**Setup guide:** [docs/AGENT_SETUP.md](docs/AGENT_SETUP.md) — duplicate our ElevenLabs agent, add your API key, run the token server, set `AGENT_BACKEND_URL`.
 
-1. Create `backend/agent-server/.env` (do not commit it):
+### Quick start
 
-```bash
-PORT=8787
-XI_API_KEY=...
-ELEVEN_AGENT_ID=agent_...
-```
+1. **ElevenLabs:** duplicate (or import) the project’s reference agent, then create an **API key**. Put the **new** agent’s ID and the key in `.env` (see guide).
 
-2. Run:
+2. **Backend:**
 
 ```bash
 cd backend/agent-server
+cp .env.example .env   # then set XI_API_KEY and ELEVEN_AGENT_ID
 npm install
 npm run dev
 ```
 
 Health check: `GET http://127.0.0.1:8787/healthz`
 
-### Flutter
+3. **Flutter** (set backend URL for your device):
 
-Run with the backend URL:
-
-- Android emulator: `http://10.0.2.2:8787`
-- iOS simulator: `http://127.0.0.1:8787`
-
-Example:
+| Target | `AGENT_BACKEND_URL` |
+|--------|---------------------|
+| Android emulator | `http://10.0.2.2:8787` |
+| iOS Simulator | `http://127.0.0.1:8787` |
+| Physical device | `http://<your PC LAN IP>:8787` |
 
 ```bash
 flutter run --dart-define=AGENT_BACKEND_URL=http://10.0.2.2:8787
@@ -94,14 +90,6 @@ flutter run --dart-define=AGENT_BACKEND_URL=http://10.0.2.2:8787
 
 - Android: `RECORD_AUDIO` (for voice)
 - iOS: `NSMicrophoneUsageDescription`
-
-### Tool calling
-
-To let Eva navigate the app, enable **client tools** in the ElevenLabs Agent settings and add tools like:
-
-- `navigate(route)`
-- `open_search(type, query, categoryTab)`
-- `trigger_shortcut(shortcutType)`
 
 ### Updating the `.proto` files
 

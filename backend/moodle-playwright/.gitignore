@@ -1,0 +1,4 @@
+node_modules/
+.moodle-storage.json
+.env
+downloads/
