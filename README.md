@@ -100,9 +100,9 @@ Moodle is mostly **web UI** here. Playwright under `backend/moodle-playwright/` 
 
 1. **ElevenLabs** — duplicate or import the reference agent, create an API key, put `ELEVEN_AGENT_ID` and `XI_API_KEY` in `.env`. Details: [docs/AGENT_SETUP.md](docs/AGENT_SETUP.md).
 
-2. **`.env`** in `backend/agent-server/` — copy [`.env.example`](backend/agent-server/.env.example). Minimum for the token server:
+2. **`.env`** in `backend/agent-server/` — copy [`.env.example`](backend/agent-server/.env.example), then set at least:
 
-```bash
+```dotenv
 PORT=8787
 XI_API_KEY=...
 ELEVEN_AGENT_ID=agent_...

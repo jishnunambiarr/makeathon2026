@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Listenables shared between [AgentScreen] and [CocoAvatar] (output level + thinking).
+/// Listenables shared between `AgentScreen` and `CocoAvatar` (output level + thinking).
 class CocoOverlayService {
   CocoOverlayService._();
   static final CocoOverlayService instance = CocoOverlayService._();
@@ -9,7 +9,7 @@ class CocoOverlayService {
   static const String defaultAvatarRivAsset =
       'assets/rive/554-1038-my-avatar.riv';
 
-  /// Wire these from your voice session (same as [CocoAvatar] listenables).
+  /// Wire these from your voice session (same listenables as `CocoAvatar`).
   final ValueNotifier<double> outputAmplitude = ValueNotifier<double>(0);
   final ValueNotifier<bool> thinking = ValueNotifier<bool>(false);
 
