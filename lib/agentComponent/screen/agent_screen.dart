@@ -7,7 +7,12 @@ import 'package:campus_flutter/main.dart';
 import 'package:campus_flutter/ui/coco_avatar.dart';
 import 'package:campus_flutter/ui/coco_overlay_service.dart';
 import 'package:elevenlabs_agents/elevenlabs_agents.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+// ignore: implementation_imports
+import 'package:livekit_client/src/support/native_audio.dart' as lk_native;
+// ignore: implementation_imports
+import 'package:livekit_client/src/track/audio_management.dart' as lk_audio;
 import 'package:rive/rive.dart' as rive;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -186,6 +191,11 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
 
       final token = await AgentBackendService().fetchConversationToken();
       const sessionTimeout = Duration(seconds: 75);
+      // Make sure iOS routes playback to the loud speaker (not the earpiece)
+      // BEFORE LiveKit initializes the audio unit. Reconfiguring after the
+      // session starts causes AURemoteIO `StartIO failed (-66637)` races.
+      _installForceSpeakerOutputOverride();
+
       await _client
           .startSession(
             conversationToken: token,
@@ -212,6 +222,31 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
         });
       }
     }
+  }
+
+  /// Patches LiveKit's `onConfigureNativeAudio` so every generated
+  /// `playAndRecord` configuration routes to the iPhone loud speaker.
+  ///
+  /// We can't just call `Hardware.instance.setSpeakerphoneOn(true,
+  /// forceSpeakerOutput: true)` after `startSession` — that reconfigures the
+  /// AVAudioSession mid-stream and triggers `AUIOClient_StartIO failed
+  /// (-66637)`. Installing the override *before* the SDK initializes the
+  /// audio unit avoids the race.
+  void _installForceSpeakerOutputOverride() {
+    if (defaultTargetPlatform != TargetPlatform.iOS) return;
+    lk_audio.onConfigureNativeAudio = (state) async {
+      final base = await lk_audio.defaultNativeAudioConfigurationFunc(state);
+      if (base.appleAudioCategory != lk_native.AppleAudioCategory.playAndRecord) {
+        return base;
+      }
+      return base.copyWith(
+        appleAudioCategoryOptions: {
+          ...?base.appleAudioCategoryOptions,
+          lk_native.AppleAudioCategoryOption.defaultToSpeaker,
+        },
+        preferSpeakerOutput: true,
+      );
+    };
   }
 
   Future<void> _disconnect() async {

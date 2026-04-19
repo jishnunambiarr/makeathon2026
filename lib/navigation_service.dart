@@ -59,7 +59,7 @@ class NavigationService {
         );
       case 5:
         return Text(
-          "Agent",
+          "Coco",
           style: Theme.of(context).textTheme.titleLarge,
         );
       default:
@@ -179,9 +179,9 @@ class NavigationService {
           label: context.tr("places"),
         ),
         const NavigationDestination(
-          icon: Icon(Icons.auto_awesome_outlined),
-          selectedIcon: Icon(Icons.auto_awesome),
-          label: "Agent",
+          icon: Icon(Icons.assistant_outlined),
+          selectedIcon: Icon(Icons.assistant),
+          label: "Coco",
         ),
       ];
 
