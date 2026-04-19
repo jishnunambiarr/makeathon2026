@@ -65,3 +65,6 @@ ios/.derived*
 
 node_modules/
 .moodle-storage.json
+
+# Local secrets (ElevenLabs, Matrix, etc.)
+backend/agent-server/.env

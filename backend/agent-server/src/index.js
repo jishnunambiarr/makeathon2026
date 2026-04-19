@@ -85,19 +85,9 @@ function parseDemoAssignmentLinksFromEnv() {
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
-/**
- * Mint an ephemeral token for the client to start an ElevenLabs realtime session.
- *
- * This endpoint MUST be called from your app/backend only (never expose XI_API_KEY).
- *
- * Env:
- * - XI_API_KEY
- * - ELEVEN_AGENT_ID
- */
+// POST body may include tumToken for future use; token is not stored. Env: XI_API_KEY, ELEVEN_AGENT_ID.
 app.post('/agent/session', async (req, res) => {
   const schema = z.object({
-    // For demo simplicity we accept the app's TUM token, but we do not store it.
-    // The realtime voice session itself does not need it; tools do.
     tumToken: z.string().min(1).optional(),
   });
 
@@ -115,10 +105,7 @@ app.post('/agent/session', async (req, res) => {
   }
 });
 
-/**
- * Read-only tool dispatcher for the agent.
- * Body: { tumToken, tool, args }
- */
+// Body: { tumToken, tool, args } — read-only campus tools (see tools/dispatch.js).
 app.post('/agent/tool', async (req, res) => {
   const schema = z.object({
     tumToken: z.string().min(1),

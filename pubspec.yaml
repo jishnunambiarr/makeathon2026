@@ -72,7 +72,7 @@ dependencies:
   map_launcher: ^4.0.0
   html: ^0.15.4
 
-  # conversational AI (ElevenLabs Agents, WebRTC via LiveKit)
+  # ElevenLabs ConvAI / Agents (realtime voice SDK)
   elevenlabs_agents: ^0.5.1
 
   # firebase

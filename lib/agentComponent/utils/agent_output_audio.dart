@@ -2,11 +2,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-/// Estimates normalized amplitude (0.0–1.0) from a base64 chunk.
-///
-/// ElevenLabs sends agent TTS audio in `onAudio` as base64; this assumes
-/// **16-bit little-endian PCM** (common for voice). If your stream format
-/// differs, adjust this helper.
+/// Normalized amplitude (0.0–1.0) from one `onAudio` base64 chunk (16-bit LE PCM).
 double amplitudeFromAgentAudioBase64(String base64Chunk) {
   if (base64Chunk.isEmpty) return 0;
   Uint8List bytes;
@@ -31,6 +27,6 @@ double pcm16LeRmsNormalized(Uint8List bytes) {
     sumSq += s * s;
   }
   final rms = math.sqrt(sumSq / sampleCount);
-  // Gentle boost so quiet speech still moves the avatar; clamp for Rive input.
+  // Slight gain for UI visibility; clamped for Rive `audioLevel` input.
   return (rms * 4.0).clamp(0.0, 1.0);
 }

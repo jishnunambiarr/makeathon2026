@@ -1,15 +1,13 @@
 # campus-agent-server
 
-Minimal Node.js backend for the hackathon agent demo:
+ElevenLabs conversation tokens, TUMonline read tools, and Matrix/Moodle **webhooks**. High-level Coco setup and env overview: [repository README](../../README.md). **Step-by-step** (duplicate agent, tool names, Flutter): [docs/AGENT_SETUP.md](../../docs/AGENT_SETUP.md).
 
 - Mints ephemeral ElevenLabs conversation tokens (WebRTC) for the client
-- Exposes a small set of **read-only** tools that fetch data from TUM services
+- Exposes **read-only** TUM tools and **webhook** routes for Matrix / Moodle demos
 
 ## Setup
 
 Copy [`.env.example`](.env.example) to `.env` and fill in values (do not commit `.env`).
-
-See the repo guide: **[docs/AGENT_SETUP.md](../../docs/AGENT_SETUP.md)** (ElevenLabs agent + client tool names + Flutter `AGENT_BACKEND_URL`).
 
 ## Run
 
@@ -46,6 +44,7 @@ Request:
 ```
 
 Tools implemented:
+
 - `get_my_courses` `{}`
 - `get_grades` `{}`
 - `search_rooms` `{ query: string }`
@@ -126,4 +125,3 @@ for reliable `m.file` delivery in the hackathon demo.
 
 - For the demo, TUMonline tool results return raw XML (`wbservicesbasic.*`). You can parse these into structured JSON later.
 - Do not log or persist user tokens in production.
-

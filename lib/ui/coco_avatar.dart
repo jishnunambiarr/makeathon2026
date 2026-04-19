@@ -29,20 +29,9 @@ Future<T> _serializedRiveDecode<T>(Future<T> Function() work) async {
   }
 }
 
-/// Avatar driven by a Rive state machine.
+/// Rive avatar with [audioLevelInputName] (lip-sync) and optional [thinkingInputName].
 ///
-/// **Rive 0.14** uses [rive.File.asset] + [rive.RiveWidgetController] (replaces the older
-/// `RiveAnimation` / `StateMachineController` API). When [stateMachineName] is null, the
-/// artboard’s **default** state machine is used (typical for ElevenLabs / Rive exports).
-/// If non-null, that named state machine is selected. Expect number input
-/// [audioLevelInputName] (default `audioLevel`) and optional boolean [thinkingInputName].
-///
-/// Call [CocoAvatarState.updateVolume] / [CocoAvatarState.setThinking] via a [GlobalKey]:
-/// ```dart
-/// final _cocoKey = GlobalKey<CocoAvatarState>();
-/// CocoAvatar(key: _cocoKey, assetPath: 'assets/rive/your_file_name.riv');
-/// _cocoKey.currentState?.updateVolume(0.7);
-/// ```
+/// [rive.File.asset] loads run one-at-a-time to avoid parallel decode failures on iOS.
 class CocoAvatar extends StatefulWidget {
   const CocoAvatar({
     super.key,
@@ -82,8 +71,7 @@ class CocoAvatar extends StatefulWidget {
 }
 
 class CocoAvatarState extends State<CocoAvatar> {
-  /// How aggressively each [updateVolume] step moves toward the target (0–1).
-  /// Higher = snappier; lower = smoother, less flicker.
+  /// Lerp factor per [updateVolume] tick toward the target amplitude.
   static const double _kAmplitudeSmoothing = 0.22;
 
   rive.File? _file;
@@ -93,7 +81,6 @@ class CocoAvatarState extends State<CocoAvatar> {
   Object? _loadError;
   int _loadAttempts = 0;
 
-  /// Low-pass filtered level applied to Rive (updated via lerp in [updateVolume]).
   double _smoothedAmplitude = 0;
 
   void _onAmplitudeListenable() {
@@ -122,8 +109,7 @@ class CocoAvatarState extends State<CocoAvatar> {
   @override
   void initState() {
     super.initState();
-    // Wait for inherited [DefaultAssetBundle]; parallel [initState] loads can
-    // race on some devices when using [rive.File.asset] from a cold start.
+    // Defer load until [DefaultAssetBundle] is available (cold start / parallel loads).
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _startLoad();
@@ -245,10 +231,7 @@ class CocoAvatarState extends State<CocoAvatar> {
     }
   }
 
-  /// Maps [volume] in `0.0`–`1.0` to the Rive number input [audioLevelInputName] (default `audioLevel`).
-  ///
-  /// Applies linear interpolation toward the new target each call so the mouth
-  /// meter does not jump on every chunk.
+  /// Writes [volume] (0–1) to the Rive number input, lerped to reduce chunk-to-chunk jumps.
   void updateVolume(double volume) {
     final target = volume.clamp(0.0, 1.0);
     final next = lerpDouble(
@@ -265,10 +248,8 @@ class CocoAvatarState extends State<CocoAvatar> {
     }
   }
 
-  /// Alias for [updateVolume] (legacy name).
   void updateAmplitude(double volume) => updateVolume(volume);
 
-  /// Drives the Rive boolean input `thinking` (e.g. alternate animation while processing).
   void setThinking(bool thinking) {
     final input = _thinkingInput;
     if (input != null) {
