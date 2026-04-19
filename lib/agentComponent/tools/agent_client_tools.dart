@@ -24,9 +24,7 @@ import 'package:elevenlabs_agents/elevenlabs_agents.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:syncfusion_flutter_calendar/calendar.dart';
 
-/// Minimal, whitelisted tool surface for the in-app ElevenLabs agent.
-///
-/// These tools are executed on-device via `elevenlabs_agents` client tool calls.
+/// Whitelisted [ClientTool]s for the in-app ElevenLabs agent (names must match the dashboard).
 class AgentClientTools {
   static const String toolGetNews = 'get_news';
   static const String toolGetCafeteriaMenu = 'get_cafeteria_menu';
@@ -175,7 +173,7 @@ class _GetCafeteriaMenuTool implements ClientTool {
       });
     }
 
-    // Pick a day: either explicit offset from today, or just the first available day.
+    // `dayOffset` from today, else first day returned by the API.
     final targetDate = DateTime.now().add(Duration(days: dayOffset));
     final targetDay = menuDays.firstWhere(
       (d) => _sameDate(d.date, targetDate),

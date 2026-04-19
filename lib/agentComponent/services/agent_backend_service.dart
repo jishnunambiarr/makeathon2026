@@ -1,15 +1,11 @@
 import 'package:dio/dio.dart';
 import 'package:uuid/uuid.dart';
 
-/// Base URL for the hackathon Node backend that mints ElevenLabs conversation tokens.
+/// HTTP client for `backend/agent-server` (`POST /agent/session`).
 ///
-/// Android **emulator**: `http://10.0.2.2:8787` (host loopback only on the emulator).
-/// **Physical device** (same Wi‑Fi as your PC): `http://<PC-LAN-IP>:8787` — **not**
-/// `10.0.2.2` (that address does not reach your computer from a real phone).
-/// iOS simulator: `http://127.0.0.1:8787`
-///
-/// Run with:
-/// `flutter run --dart-define=AGENT_BACKEND_URL=http://10.0.2.2:8787`
+/// Base URL: `--dart-define=AGENT_BACKEND_URL=...` (see repository README).
+/// Android emulator: `http://10.0.2.2:8787`; iOS simulator: `http://127.0.0.1:8787`;
+/// physical device: your machine's LAN IP (not `10.0.2.2`).
 class AgentBackendService {
   AgentBackendService({Dio? dio})
       : _dio = dio ??
