@@ -50,6 +50,39 @@ function mergeWebhookBody(body) {
   };
 }
 
+/** Hackathon demo: optional defaults so webhooks need no `courseUrl` / `match` in the tool body. */
+function defaultDemoMoodleCourseUrl() {
+  return process.env.DEMO_MOODLE_COURSE_URL?.trim() || '';
+}
+
+function defaultDemoMoodleMatch() {
+  return process.env.DEMO_MOODLE_MATCH?.trim() || 'Blatt';
+}
+
+/** Comma-separated alternatives in `DEMO_MOODLE_MATCH` or request body, e.g. `Übungsblatt,Blatt,pdf`. */
+function parseMatchAlternatives(matchStr) {
+  const s = matchStr == null ? '' : String(matchStr).trim();
+  if (!s) return [defaultDemoMoodleMatch()];
+  const parts = s.split(',').map((p) => p.trim()).filter(Boolean);
+  return parts.length > 0 ? parts : [defaultDemoMoodleMatch()];
+}
+
+/**
+ * Static list for `POST /webhooks/matrix-demo-links` — no Playwright, no Moodle session.
+ * JSON array, e.g. [{"label":"LA","url":"https://moodle.tum.de/course/view.php?id=…"}]
+ */
+function parseDemoAssignmentLinksFromEnv() {
+  const raw = process.env.DEMO_ASSIGNMENT_LINKS?.trim();
+  if (!raw) return null;
+  try {
+    const data = JSON.parse(raw);
+    if (!Array.isArray(data) || data.length === 0) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
 /**
@@ -115,26 +148,44 @@ app.post('/agent/tool', async (req, res) => {
  * Default **`delivery`: `"link"`** — sends one text: assignment line + URL (no PDF upload).
  * Use **`delivery`: `"file"`** to download and send an `m.file` (slower; needs a real file URL).
  *
- * Body: `{ "courseUrl", "match", "delivery"?: "link" | "file" }`
+ * Body: `{ "courseUrl"?, "match"?, "delivery"?: "link" | "file" }`
+ *
+ * If `courseUrl` / `match` are omitted, uses `DEMO_MOODLE_COURSE_URL` and `DEMO_MOODLE_MATCH`
+ * from `.env` (hackathon booth). ElevenLabs often cannot send a truly empty body — use
+ * `{"demo": true}` (any extra keys are ignored).
  *
  * Env: MATRIX_HOMESERVER, MATRIX_ACCESS_TOKEN, MATRIX_ROOM_ID; optional MOODLE_STORAGE_PATH,
- * MATRIX_WEBHOOK_SECRET or MOODLE_MATRIX_WEBHOOK_SECRET.
+ * DEMO_MOODLE_COURSE_URL, DEMO_MOODLE_MATCH, MATRIX_WEBHOOK_SECRET or MOODLE_MATRIX_WEBHOOK_SECRET.
  */
 app.post('/webhooks/moodle-to-matrix', requireWebhookSecret, async (req, res) => {
   const nested = mergeWebhookBody(req.body);
 
+  const courseUrlMerged =
+    nested.courseUrl ?? nested.course_url ?? defaultDemoMoodleCourseUrl();
+  const matchMerged = (nested.match && String(nested.match).trim()) || defaultDemoMoodleMatch();
+
+  if (!courseUrlMerged) {
+    return res.status(400).json({
+      error: 'courseUrl_required',
+      hint:
+        'Pass courseUrl in the webhook body or set DEMO_MOODLE_COURSE_URL in backend/agent-server/.env',
+    });
+  }
+
   const schema = z.object({
     courseUrl: z.string().url(),
     match: z.string().min(1),
-    delivery: z.enum(['link', 'file']).optional().default('link'),
+    delivery: z.enum(['link', 'file']).optional().default('file'),
   });
 
   const parsed = schema.safeParse({
-    courseUrl: nested.courseUrl ?? nested.course_url,
-    match: nested.match,
+    courseUrl: courseUrlMerged,
+    match: matchMerged,
     delivery: nested.delivery,
   });
   if (!parsed.success) return res.status(400).json({ error: parsed.error.format() });
+
+  const matchList = parseMatchAlternatives(parsed.data.match);
 
   const homeserver = process.env.MATRIX_HOMESERVER?.trim();
   const accessToken = process.env.MATRIX_ACCESS_TOKEN?.trim();
@@ -159,36 +210,49 @@ app.post('/webhooks/moodle-to-matrix', requireWebhookSecret, async (req, res) =>
   let downloadDir = null;
   try {
     if (parsed.data.delivery === 'link') {
-      const { json } = await runMoodleFetch({
-        courseUrl: parsed.data.courseUrl,
-        match: parsed.data.match,
-        linkOnly: true,
-      });
+      let lastJson = { ok: false, error: 'no_matching_link' };
+      for (const m of matchList) {
+        const { json } = await runMoodleFetch({
+          courseUrl: parsed.data.courseUrl,
+          match: m,
+          linkOnly: true,
+        });
+        lastJson = json;
+        if (json.ok && json.url) {
+          const matrixBody = `Here are the assignments for this week:\n${json.url}`;
+          const sent = await sendTextMessage(homeserver, accessToken, roomId, matrixBody);
 
-      if (!json.ok || !json.url) {
-        const detail = json.error ? String(json.error) : 'fetch_incomplete';
-        await sendErr(`Moodle → Matrix: ${detail} (course: ${parsed.data.courseUrl})`);
-        return res.status(200).json({ ok: false, moodle: json, matrix: 'notified_room_text' });
+          return res.status(200).json({
+            ok: true,
+            delivery: 'link',
+            moodle: { title: json.title, url: json.url, matchUsed: m },
+            matrix: { event_id: sent.event_id },
+          });
+        }
       }
 
-      const matrixBody = `Here are the assignments for this week:\n${json.url}`;
-      const sent = await sendTextMessage(homeserver, accessToken, roomId, matrixBody);
-
-      return res.status(200).json({
-        ok: true,
-        delivery: 'link',
-        moodle: { title: json.title, url: json.url },
-        matrix: { event_id: sent.event_id },
-      });
+      const detail = lastJson.error ? String(lastJson.error) : 'fetch_incomplete';
+      await sendErr(`Moodle → Matrix: ${detail} (course: ${parsed.data.courseUrl})`);
+      return res.status(200).json({ ok: false, moodle: lastJson, matrix: 'notified_room_text' });
     }
 
-    downloadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'moodle-mx-'));
-    const { json } = await runMoodleFetch({
-      courseUrl: parsed.data.courseUrl,
-      match: parsed.data.match,
-      downloadDir,
-    });
+    let lastFileJson = { ok: false, error: 'no_matching_link' };
+    for (const m of matchList) {
+      downloadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'moodle-mx-'));
+      const { json } = await runMoodleFetch({
+        courseUrl: parsed.data.courseUrl,
+        match: m,
+        downloadDir,
+      });
+      lastFileJson = json;
+      if (json.ok && json.downloadedPath) {
+        break;
+      }
+      if (downloadDir) fs.rmSync(downloadDir, { recursive: true, force: true });
+      downloadDir = null;
+    }
 
+    const json = lastFileJson;
     if (!json.ok || !json.downloadedPath) {
       const detail = json.error ? String(json.error) : 'fetch_incomplete';
       await sendErr(`Moodle → Matrix: ${detail} (course: ${parsed.data.courseUrl})`);
@@ -293,6 +357,75 @@ app.post('/webhooks/matrix-message', requireWebhookSecret, async (req, res) => {
     // eslint-disable-next-line no-console
     console.error('[matrix-message]', message);
     return res.status(500).json({ error: 'matrix_message_failed', message });
+  }
+});
+
+/**
+ * Hackathon demo: post a fixed list of course / assignment URLs to Matrix — no Playwright, no Moodle session.
+ *
+ * Set `DEMO_ASSIGNMENT_LINKS` in `.env` (JSON array), or POST `{ "links": [{ "label"?, "url" }] }`.
+ * ElevenLabs: if empty `{}` is not allowed, use `{ "demo": true }` — ignored by this handler.
+ * Same Matrix env + optional webhook secret as other routes.
+ */
+app.post('/webhooks/matrix-demo-links', requireWebhookSecret, async (req, res) => {
+  const nested = mergeWebhookBody(req.body ?? {});
+  let links = null;
+  if (Array.isArray(nested.links) && nested.links.length > 0) {
+    links = nested.links;
+  } else {
+    links = parseDemoAssignmentLinksFromEnv();
+  }
+
+  if (!links || links.length === 0) {
+    return res.status(400).json({
+      error: 'links_required',
+      hint:
+        'Set DEMO_ASSIGNMENT_LINKS in .env (JSON array) or POST { "links": [{ "label": "LA", "url": "https://…" }] }',
+    });
+  }
+
+  const itemSchema = z.object({
+    label: z.string().optional(),
+    url: z.string().url(),
+  });
+
+  const rows = [];
+  for (let i = 0; i < links.length; i += 1) {
+    const parsedItem = itemSchema.safeParse(links[i]);
+    if (!parsedItem.success) {
+      return res.status(400).json({ error: 'invalid_link_item', index: i, detail: parsedItem.error.format() });
+    }
+    rows.push(parsedItem.data);
+  }
+
+  const homeserver = process.env.MATRIX_HOMESERVER?.trim();
+  const accessToken = process.env.MATRIX_ACCESS_TOKEN?.trim();
+  const roomId = process.env.MATRIX_ROOM_ID?.trim();
+
+  if (!homeserver || !accessToken || !roomId) {
+    return res.status(500).json({
+      error: 'matrix_not_configured',
+      hint: 'Set MATRIX_HOMESERVER, MATRIX_ACCESS_TOKEN, MATRIX_ROOM_ID in .env',
+    });
+  }
+
+  const bodyText = [
+    'Assignment / course links (demo):',
+    ...rows.map((r) => `${r.label ? `${r.label}: ` : ''}${r.url}`),
+  ].join('\n');
+
+  try {
+    const sent = await sendTextMessage(homeserver, accessToken, roomId, bodyText);
+    return res.status(200).json({
+      ok: true,
+      matrix: { event_id: sent.event_id },
+      count: rows.length,
+    });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    // eslint-disable-next-line no-console
+    console.error('[matrix-demo-links]', message);
+    return res.status(500).json({ error: 'matrix_demo_links_failed', message });
   }
 });
 

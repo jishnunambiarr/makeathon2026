@@ -78,6 +78,20 @@ Requires:
 Optional: set `MATRIX_WEBHOOK_SECRET` (or legacy `MOODLE_MATRIX_WEBHOOK_SECRET`) and call with
 `Authorization: Bearer <secret>` or header `x-webhook-secret`.
 
+**Hackathon booth (optional):** set `DEMO_MOODLE_COURSE_URL` and `DEMO_MOODLE_MATCH` in `.env` so the ElevenLabs
+webhook can use **`{}`** or **`{"demo": true}`** (ElevenLabs often cannot use a completely empty body) — the server fills in the course page URL and substring match
+(Playwright still resolves one matching resource link on that page; tune `DEMO_MOODLE_MATCH` to your sheet name,
+e.g. `Blatt`, `Übung`, `Assignment`).
+
+### `POST /webhooks/matrix-demo-links`
+
+No Moodle session and no browser: posts a **fixed list** of URLs you configure for the demo.
+
+- Set **`DEMO_ASSIGNMENT_LINKS`** in `.env` to a JSON array: `[{"label":"LA","url":"https://moodle.tum.de/course/view.php?id=…"}, …]`
+- Or POST `{ "links": [ … ] }` with the same shape.
+
+Use this when you only need “here are our course pages / assignment links” in Matrix without scraping.
+
 ### `POST /webhooks/matrix-message`
 
 Server / webhook tool: posts **plain text** to `MATRIX_ROOM_ID`. Use it when the agent should

@@ -20,12 +20,69 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/** Lowercase + strip combining marks so "Übungsblatt" matches "Ubungsblatt" in URLs/text. */
+function foldComparable(s) {
+  if (!s) return '';
+  return s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+}
+
 /** True if this href is already a Moodle file endpoint (not an HTML activity wrapper). */
 function isLikelyDirectFileHref(href) {
   const h = href.toLowerCase();
   if (h.includes('pluginfile.php')) return true;
   if (h.includes('forcedownload=1') || h.includes('forcedownload=2')) return true;
   if (h.includes('.pdf') && !h.includes('/mod/')) return true;
+  return false;
+}
+
+/**
+ * True for links that are obviously not assignment/resource content
+ * (breadcrumbs, course index, category listings, login/logout, profile, dashboard,
+ * and course-view.php without a valid `id=` param — which is the one that triggers
+ * Moodle's "must specify course id" error page when opened).
+ */
+function isNavigationNoise(href) {
+  let u;
+  try {
+    u = new URL(href);
+  } catch {
+    return false;
+  }
+  const p = u.pathname.toLowerCase();
+  const qs = u.searchParams;
+
+  // /course/view.php without id= → the URL that breaks in Matrix.
+  if (p.endsWith('/course/view.php')) {
+    const hasCourseId =
+      qs.has('id') && /^\d+$/.test((qs.get('id') || '').trim());
+    if (!hasCourseId) return true;
+  }
+  if (p.endsWith('/course/index.php')) return true;
+  if (p === '/course/' || p === '/course') return true;
+  if (p.startsWith('/my/')) return true;
+  if (p.startsWith('/user/')) return true;
+  if (p.startsWith('/login/')) return true;
+  if (p.startsWith('/logout')) return true;
+  if (p.startsWith('/calendar/')) return true;
+  if (p.startsWith('/grade/')) return true;
+  if (p.startsWith('/message/')) return true;
+  if (p.startsWith('/admin/')) return true;
+  if (p.startsWith('/theme/')) return true;
+  return false;
+}
+
+/** True if the link actually points at content we want to forward. */
+function isResourceLike(href) {
+  const h = href.toLowerCase();
+  if (h.includes('pluginfile.php')) return true;
+  if (/\.pdf(\?|#|$)/.test(h)) return true;
+  if (h.includes('/mod/resource/')) return true;
+  if (h.includes('/mod/url/')) return true;
+  if (h.includes('/mod/folder/')) return true;
+  if (h.includes('/mod/assign/')) return true;
   return false;
 }
 
@@ -44,11 +101,39 @@ function isMoodleFileActivityWrapper(href) {
  * Open a resource/url/folder view page and find the actual download URL (usually pluginfile.php).
  * @param {import('playwright').Page} page
  * @param {string} activityHref
- * @param {string} needleLower
+ * @param {string} needleFold from [foldComparable]
  * @returns {Promise<{ url: string; linkText: string } | null>}
  */
-async function resolveActivityToFileUrl(page, activityHref, needleLower) {
-  await page.goto(activityHref, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+async function resolveActivityToFileUrl(page, activityHref, needleFold) {
+  // Some Moodle resources are configured as force-download: hitting the
+  // activity URL immediately serves the file with Content-Disposition:
+  // attachment, which makes page.goto throw "Download is starting". Start
+  // listening for a download event *before* navigating so we can capture the
+  // resolved file URL (usually pluginfile.php) and return it.
+  const downloadPromise = page
+    .waitForEvent('download', { timeout: 10_000 })
+    .catch(() => null);
+
+  try {
+    await page.goto(activityHref, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+  } catch (e) {
+    if (/Download is starting/i.test(String(e && e.message))) {
+      const download = await downloadPromise;
+      if (download) {
+        const url = download.url();
+        const linkText = download.suggestedFilename() || '';
+        try {
+          await download.cancel();
+        } catch {
+          /* ignore */
+        }
+        return { url, linkText };
+      }
+      // Download event didn't arrive — wrapper is still valid in a browser.
+      return { url: activityHref, linkText: '' };
+    }
+    throw e;
+  }
   await sleep(delayMs);
 
   const found = await page.evaluate(() => {
@@ -78,7 +163,8 @@ async function resolveActivityToFileUrl(page, activityHref, needleLower) {
     if (h.includes('mod_assign') && h.includes('pluginfile.php')) s += 4;
     if (h.includes('.pdf')) s += 4;
     if (h.includes('forcedownload')) s += 2;
-    if (needleLower && (t.includes(needleLower) || h.includes(needleLower))) s += 3;
+    if (needleFold && (foldComparable(t).includes(needleFold) || foldComparable(h).includes(needleFold)))
+      s += 3;
     if (h.includes('/mod/resource/view.php') || h.includes('/mod/assign/view.php')) s -= 5;
     if (s > bestScore) {
       bestScore = s;
@@ -95,10 +181,10 @@ async function resolveActivityToFileUrl(page, activityHref, needleLower) {
     const l = pluginOnly[0];
     return { url: l.href, linkText: l.text };
   }
-  if (pluginOnly.length > 1 && needleLower) {
+  if (pluginOnly.length > 1 && needleFold) {
     const byNeedle = pluginOnly.find(
       (l) =>
-        l.text.toLowerCase().includes(needleLower) || l.href.toLowerCase().includes(needleLower),
+        foldComparable(l.text).includes(needleFold) || foldComparable(l.href).includes(needleFold),
     );
     if (byNeedle) return { url: byNeedle.href, linkText: byNeedle.text };
     const intro = pluginOnly.find((l) => l.href.toLowerCase().includes('introattachment'));
@@ -151,7 +237,7 @@ if (!fs.existsSync(storagePath)) {
   process.exit(1);
 }
 
-const needle = args.match.toLowerCase();
+const needleFold = foldComparable(args.match);
 
 const browser = await chromium.launch({ headless: args.headless });
 const context = await browser.newContext({ storageState: storagePath });
@@ -177,29 +263,37 @@ try {
     return out;
   });
 
-  const candidates = links.filter(
-    (l) => l.text.toLowerCase().includes(needle) || l.href.toLowerCase().includes(needle),
-  );
+  const candidates = links
+    .filter((l) => !isNavigationNoise(l.href))
+    .filter(
+      (l) =>
+        foldComparable(l.text).includes(needleFold) ||
+        foldComparable(l.href).includes(needleFold),
+    );
 
   const scored = candidates.map((l) => {
     let score = 0;
     const h = l.href.toLowerCase();
-    const t = l.text.toLowerCase();
+    const hf = foldComparable(l.href);
+    const tf = foldComparable(l.text);
     if (h.includes('.pdf')) score += 4;
     if (h.includes('pluginfile.php')) score += 3;
     if (h.includes('introattachment')) score += 6;
     if (h.includes('/mod/resource/')) score += 2;
     if (h.includes('/mod/url/')) score += 1;
-    if (t.includes(needle)) score += 2;
+    if (needleFold && (tf.includes(needleFold) || hf.includes(needleFold))) score += 2;
     // Prefer direct files / intro PDFs over plain assignment activity links when both match.
     if (h.includes('/mod/assign/view.php')) score -= 2;
     if (h.includes('/mod/forum/')) score -= 4;
     if (h.includes('/mod/quiz/')) score -= 4;
+    // Anything not in /mod/* or pluginfile.php/.pdf is almost certainly navigation
+    // chrome that just happens to contain the keyword (breadcrumbs, sidebar, etc.).
+    if (!isResourceLike(l.href)) score -= 10;
     return { ...l, score };
   });
 
   scored.sort((a, b) => b.score - a.score);
-  const best = scored[0];
+  const best = scored.find((l) => l.score > 0) || null;
 
   if (!best) {
     console.log(
@@ -221,7 +315,7 @@ try {
       isMoodleFileActivityWrapper(best.href) && !isLikelyDirectFileHref(best.href);
 
     if (mustResolve && (args.downloadDir || args.linkOnly)) {
-      const resolved = await resolveActivityToFileUrl(page, best.href, needle);
+      const resolved = await resolveActivityToFileUrl(page, best.href, needleFold);
       if (!resolved) {
         console.log(
           JSON.stringify({
