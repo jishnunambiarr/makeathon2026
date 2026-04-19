@@ -32,8 +32,9 @@ Future<T> _serializedRiveDecode<T>(Future<T> Function() work) async {
 /// Avatar driven by a Rive state machine.
 ///
 /// **Rive 0.14** uses [rive.File.asset] + [rive.RiveWidgetController] (replaces the older
-/// `RiveAnimation` / `StateMachineController` API). Your `.riv` should define a state
-/// machine named [stateMachineName] (default `MainState`) with number input
+/// `RiveAnimation` / `StateMachineController` API). When [stateMachineName] is null, the
+/// artboard’s **default** state machine is used (typical for ElevenLabs / Rive exports).
+/// If non-null, that named state machine is selected. Expect number input
 /// [audioLevelInputName] (default `audioLevel`) and optional boolean [thinkingInputName].
 ///
 /// Call [CocoAvatarState.updateVolume] / [CocoAvatarState.setThinking] via a [GlobalKey]:
@@ -46,7 +47,7 @@ class CocoAvatar extends StatefulWidget {
   const CocoAvatar({
     super.key,
     required this.assetPath,
-    this.stateMachineName = 'MainState',
+    this.stateMachineName,
     this.audioLevelInputName = 'audioLevel',
     this.thinkingInputName = 'thinking',
     this.fit = rive.Fit.contain,
@@ -58,8 +59,8 @@ class CocoAvatar extends StatefulWidget {
   /// Bundle path, e.g. `assets/rive/your_file_name.riv` (must match `pubspec.yaml`).
   final String assetPath;
 
-  /// Must match the state machine name in the Rive editor.
-  final String stateMachineName;
+  /// When set, selects this state machine by name; when null, uses the artboard default.
+  final String? stateMachineName;
 
   /// Rive state machine number input for lip-sync / level meter.
   final String audioLevelInputName;
@@ -150,8 +151,9 @@ class CocoAvatarState extends State<CocoAvatar> {
 
   void _logLoadFailure(Object e, StackTrace st, {required String phase}) {
     final path = widget.assetPath;
+    final sm = widget.stateMachineName ?? '(default)';
     final msg =
-        'CocoAvatar: FAILED [$phase] asset="$path" stateMachine="${widget.stateMachineName}" '
+        'CocoAvatar: FAILED [$phase] asset="$path" stateMachine="$sm" '
         'audioInput="${widget.audioLevelInputName}"\nError: $e\nStack:\n$st';
     debugPrint(msg);
     print(msg);
@@ -184,7 +186,9 @@ class CocoAvatarState extends State<CocoAvatar> {
       try {
         controller = rive.RiveWidgetController(
           file,
-          stateMachineSelector: rive.StateMachineNamed(widget.stateMachineName),
+          stateMachineSelector: widget.stateMachineName != null
+              ? rive.StateMachineNamed(widget.stateMachineName!)
+              : const rive.StateMachineDefault(),
         );
       } catch (e, st) {
         _logLoadFailure(e, st, phase: 'RiveWidgetController');
@@ -198,9 +202,10 @@ class CocoAvatarState extends State<CocoAvatar> {
         // ignore: deprecated_member_use
         _thinkingInput = controller.stateMachine.boolean(widget.thinkingInputName);
         if (_audioLevelInput == null) {
+          final smLabel = widget.stateMachineName ?? '(default)';
           debugPrint(
             'CocoAvatar: WARNING — no number input "${widget.audioLevelInputName}" on '
-            'state machine "${widget.stateMachineName}" (asset "$path").',
+            'state machine "$smLabel" (asset "$path").',
           );
         }
         if (_thinkingInput == null) {
@@ -285,39 +290,51 @@ class CocoAvatarState extends State<CocoAvatar> {
   Widget build(BuildContext context) {
     if (_loadError != null) {
       final cs = Theme.of(context).colorScheme;
-      return SizedBox(
-        width: kCocoAvatarFallbackSize,
-        height: kCocoAvatarFallbackSize,
-        child: Center(
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () {
-              setState(() {
-                _loadError = null;
-                _loadAttempts = 0;
-              });
-              _startLoad();
-            },
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.refresh_rounded,
-                  size: 28,
-                  color: cs.onSurfaceVariant.withValues(alpha: 0.7),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Tap to retry',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: cs.onSurfaceVariant,
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          var w = constraints.maxWidth;
+          var h = constraints.maxHeight;
+          if (!w.isFinite || w <= 0) w = kCocoAvatarFallbackSize;
+          if (!h.isFinite || h <= 0) h = kCocoAvatarFallbackSize;
+          return SizedBox(
+            width: w,
+            height: h,
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    setState(() {
+                      _loadError = null;
+                      _loadAttempts = 0;
+                    });
+                    _startLoad();
+                  },
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.refresh_rounded,
+                        size: 28,
+                        color: cs.onSurfaceVariant.withValues(alpha: 0.7),
                       ),
-                  textAlign: TextAlign.center,
+                      const SizedBox(height: 4),
+                      Text(
+                        'Tap to retry',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              color: cs.onSurfaceVariant,
+                            ),
+                        textAlign: TextAlign.center,
+                        softWrap: true,
+                      ),
+                    ],
+                  ),
                 ),
-              ],
+              ),
             ),
-          ),
-        ),
+          );
+        },
       );
     }
     final controller = _riveController;

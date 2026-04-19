@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:campus_flutter/agentComponent/services/agent_backend_service.dart';
 import 'package:campus_flutter/agentComponent/tools/agent_client_tools.dart';
 import 'package:campus_flutter/agentComponent/utils/agent_output_audio.dart';
@@ -42,7 +44,40 @@ Map<String, ClientTool> _wrapToolsForThinkingHook({
   };
 }
 
-/// Voice agent tab: ElevenLabs Eva via WebRTC (official SDK) + backend-minted token.
+String _friendlyConnectError(Object e) {
+  if (e is TimeoutException) {
+    return 'Could not connect in time. Check your network and try again.';
+  }
+  final s = e.toString();
+  if (s.contains('SocketException') || s.contains('Failed host lookup')) {
+    return 'No connection to the server. Check your network and try again.';
+  }
+  if (s.contains('ClientException') || s.contains('Connection refused')) {
+    return 'Could not reach the voice service. Please try again later.';
+  }
+  return 'Could not start the voice session. Please try again.';
+}
+
+String _friendlyAgentRuntimeError(String message, [String? ctx]) {
+  final combined = ctx != null && ctx.isNotEmpty ? '$message $ctx' : message;
+  final lower = combined.toLowerCase();
+  if (lower.contains('timeout') || lower.contains('timed out')) {
+    return 'The connection timed out. Please try again.';
+  }
+  if (lower.contains('network') || lower.contains('socket')) {
+    return 'A network error occurred. Please try again.';
+  }
+  if (combined.length > 140 ||
+      combined.contains('\n') ||
+      combined.contains('http://') ||
+      combined.contains('https://') ||
+      RegExp(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}').hasMatch(combined)) {
+    return 'Something went wrong. Please try again.';
+  }
+  return message;
+}
+
+/// Voice agent tab (Coco): ElevenLabs via WebRTC (official SDK) + backend-minted token.
 class AgentScreen extends ConsumerStatefulWidget {
   const AgentScreen({super.key});
 
@@ -57,7 +92,6 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
   CocoOverlayService get _coco => getIt<CocoOverlayService>();
 
   double _smoothedAmp = 0;
-  bool _lastSpeaking = false;
 
   String? _error;
   bool _busy = false;
@@ -69,11 +103,9 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
 
   void _onClientChanged() {
     final speaking = _client.isSpeaking;
-    _coco.agentSpeaking.value = speaking;
-    if (speaking && !_lastSpeaking) {
+    if (speaking) {
       _coco.thinking.value = false;
     }
-    _lastSpeaking = speaking;
     if (!speaking) {
       _smoothedAmp *= 0.88;
       if (_smoothedAmp < 0.015) {
@@ -109,13 +141,12 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
         },
         onError: (message, [ctx]) {
           setState(() {
-            _error = message;
+            _error = _friendlyAgentRuntimeError(message, ctx);
           });
         },
         onUnhandledClientToolCall: (toolCall) {
           setState(() {
-            _error =
-                'Unhandled tool call: ${toolCall.toolName} (${toolCall.toolCallId})';
+            _error = 'That action is not available yet.';
           });
         },
         onModeChange: ({required mode}) {
@@ -130,7 +161,7 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
   void dispose() {
     _client.removeListener(_onClientChanged);
     _client.dispose();
-    _coco.resetOverlayPresentation();
+    _coco.resetAvatarState();
     super.dispose();
   }
 
@@ -147,29 +178,33 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
       final mic = await Permission.microphone.request();
       if (!mic.isGranted) {
         setState(() {
-          _error = 'Microphone permission is required for voice.';
+          _error = 'Microphone access is needed for voice.';
           _busy = false;
         });
         return;
       }
 
       final token = await AgentBackendService().fetchConversationToken();
-      await _client.startSession(
-        conversationToken: token,
-        userId: AgentBackendService.defaultUserId(),
-        overrides: ConversationOverrides(
-          tts: TtsOverrides(useSpeakerBoost: true),
-        ),
-      );
+      const sessionTimeout = Duration(seconds: 75);
+      await _client
+          .startSession(
+            conversationToken: token,
+            userId: AgentBackendService.defaultUserId(),
+            overrides: ConversationOverrides(
+              tts: TtsOverrides(useSpeakerBoost: true),
+            ),
+          )
+          .timeout(sessionTimeout);
       await _client.setMicMuted(false);
-      if (mounted) {
-        _coco.overlayExpanded.value = false;
-        _coco.voiceSessionActive.value = true;
-      }
     } catch (e) {
       setState(() {
-        _error = e.toString();
+        _error = _friendlyConnectError(e);
       });
+      try {
+        await _client.endSession();
+      } catch (_) {
+        // Clears stuck "connecting" after timeout or partial failure.
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -185,7 +220,7 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
       await _client.endSession();
     } finally {
       if (mounted) {
-        _coco.resetOverlayPresentation();
+        _coco.resetAvatarState();
         _smoothedAmp = 0;
         setState(() => _busy = false);
       }
@@ -195,105 +230,143 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
   @override
   Widget build(BuildContext context) {
     final connected = _connected;
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
 
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Expanded(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(24),
-                child: Container(
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  child: Stack(
-                    children: [
-                      Positioned.fill(
-                        child: CocoAvatar(
-                          assetPath: CocoOverlayService.defaultAvatarRivAsset,
-                          outputAmplitudeListenable: _coco.outputAmplitude,
-                          thinkingListenable: _coco.thinking,
-                          fit: rive.Fit.contain,
+            DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(22),
+                color: scheme.surfaceContainerHighest,
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+                child: Column(
+                  children: [
+                    Center(
+                      child: ClipOval(
+                        child: ColoredBox(
+                          color: scheme.surface,
+                          child: SizedBox(
+                            width: 168,
+                            height: 168,
+                            child: CocoAvatar(
+                              assetPath: CocoOverlayService.defaultAvatarRivAsset,
+                              outputAmplitudeListenable: _coco.outputAmplitude,
+                              thinkingListenable: _coco.thinking,
+                              fit: rive.Fit.contain,
+                            ),
+                          ),
                         ),
                       ),
-                      Positioned(
-                        left: 16,
-                        right: 16,
-                        bottom: 16,
-                        child: _StatusCard(
-                          connected: connected,
-                          statusLabel: _statusLabel(),
-                          clientStatus: _client.status.name,
+                    ),
+                    const SizedBox(height: 12),
+                    _StatusRow(
+                      connected: connected,
+                      label: _statusLabel(),
+                    ),
+                    if (_error != null) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        _error!,
+                        style: textTheme.bodySmall?.copyWith(
+                          color: scheme.error,
+                          height: 1.35,
                         ),
+                        textAlign: TextAlign.center,
                       ),
                     ],
-                  ),
+                    if (connected && _client.isMuted) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Microphone is muted — Coco cannot hear you.',
+                        style: textTheme.bodySmall?.copyWith(
+                          color: scheme.error,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      TextButton.icon(
+                        onPressed: _busy
+                            ? null
+                            : () async {
+                                setState(() => _busy = true);
+                                try {
+                                  await _client.setMicMuted(false);
+                                } finally {
+                                  if (mounted) setState(() => _busy = false);
+                                }
+                              },
+                        icon: const Icon(Icons.mic, size: 18),
+                        label: const Text('Unmute'),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed: (_busy || connected) ? null : _connect,
+                            icon: const Icon(Icons.mic, size: 20),
+                            label: Text(_busy ? 'Connecting…' : 'Start voice'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: (_busy || !connected) ? null : _disconnect,
+                            icon: const Icon(Icons.stop_circle_outlined, size: 20),
+                            label: const Text('Stop'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
             ),
-            if (_error != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                _error!,
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.error,
-                  fontSize: 12,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ],
-            if (connected && _client.isMuted) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Microphone is muted — the agent cannot hear you.',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.error,
-                  fontSize: 12,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              TextButton.icon(
-                onPressed: _busy
-                    ? null
-                    : () async {
-                        setState(() => _busy = true);
-                        try {
-                          await _client.setMicMuted(false);
-                        } finally {
-                          if (mounted) setState(() => _busy = false);
-                        }
-                      },
-                icon: const Icon(Icons.mic, size: 18),
-                label: const Text('Unmute microphone'),
-              ),
-            ],
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: (_busy || connected) ? null : _connect,
-                    icon: const Icon(Icons.mic),
-                    label: Text(_busy ? 'Connecting…' : 'Connect'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: (_busy || !connected) ? null : _disconnect,
-                    icon: const Icon(Icons.stop),
-                    label: const Text('Disconnect'),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 20),
             Text(
-              'Backend: ${AgentBackendService.baseUrl}\n'
-              'Set ELEVEN_AGENT_ID on the server (Eva agent). '
-              'Flutter: --dart-define=AGENT_BACKEND_URL=…',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodySmall,
+              'What you can ask',
+              style: textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.2,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Examples — say it in your own words.',
+              style: textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: ListView(
+                physics: const BouncingScrollPhysics(),
+                children: const [
+                  _CapabilityCard(
+                    icon: Icons.description_outlined,
+                    text:
+                        'Send a homework sheet from Moodle to a messenger for you.',
+                  ),
+                  SizedBox(height: 10),
+                  _CapabilityCard(
+                    icon: Icons.event_note_outlined,
+                    text:
+                        'Check your calendar and the Mensa menu and summarize what matters.',
+                  ),
+                  SizedBox(height: 10),
+                  _CapabilityCard(
+                    icon: Icons.edit_calendar_outlined,
+                    text: 'Add or update entries in your calendar.',
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -303,69 +376,105 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
 
   String _statusLabel() {
     if (_client.status == ConversationStatus.disconnected) {
-      return 'Disconnected';
+      return 'Ready to connect';
     }
     if (_client.status == ConversationStatus.connecting) {
       return 'Connecting…';
     }
-    if (_client.isSpeaking) return 'Eva is speaking';
-    return 'Listening…';
+    if (_client.isSpeaking) return 'Coco is speaking';
+    return 'Listening for you';
   }
 }
 
-class _StatusCard extends StatelessWidget {
-  final bool connected;
-  final String statusLabel;
-  final String clientStatus;
-
-  const _StatusCard({
+class _StatusRow extends StatelessWidget {
+  const _StatusRow({
     required this.connected,
-    required this.statusLabel,
-    required this.clientStatus,
+    required this.label,
   });
+
+  final bool connected;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
-    final dotColor = connected ? Colors.green : Colors.grey;
+    final scheme = Theme.of(context).colorScheme;
+    final dotColor = connected ? const Color(0xFF2E7D32) : scheme.outline;
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    return Row(
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            color: dotColor,
+            shape: BoxShape.circle,
+            boxShadow: connected
+                ? [
+                    BoxShadow(
+                      color: dotColor.withValues(alpha: 0.45),
+                      blurRadius: 6,
+                      spreadRadius: 0,
+                    ),
+                  ]
+                : null,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            label,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _CapabilityCard extends StatelessWidget {
+  const _CapabilityCard({
+    required this.icon,
+    required this.text,
+  });
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return DecoratedBox(
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.85),
+        color: scheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: Theme.of(context).dividerColor.withValues(alpha: 0.25),
+          color: scheme.outlineVariant.withValues(alpha: 0.4),
         ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 10,
-                height: 10,
-                decoration:
-                    BoxDecoration(color: dotColor, shape: BoxShape.circle),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              icon,
+              size: 26,
+              color: scheme.primary,
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                text,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      height: 1.4,
+                    ),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  statusLabel,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            clientStatus,
-            style: Theme.of(context).textTheme.labelSmall,
-          ),
-        ],
+            ),
+          ],
+        ),
       ),
     );
   }
