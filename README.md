@@ -81,10 +81,10 @@ More tools exist in code (news, MVV, room search, grades, courses, …) — same
 
 Implemented on **`backend/agent-server`** (paths and bodies: [`backend/agent-server/README.md`](backend/agent-server/README.md)).
 
-| Webhook | Purpose |
-|---------|---------|
-| `moodle_to_matrix` | Moodle course URL + substring → this week’s resource → Matrix (demo; no official Moodle API). |
-| `matrix_message` | Plain text to a Matrix room. |
+| Webhook/tool name | Endpoint path | Purpose |
+|-------------------|---------------|---------|
+| `moodle_to_matrix` | `/webhooks/moodle-to-matrix` | Moodle course URL + substring → this week’s resource → Matrix (demo; no official Moodle API). |
+| `matrix_message` | `/webhooks/matrix-message` | Plain text to a Matrix room. |
 
 Register the public `https://…/webhooks/…` URLs in ElevenLabs (ngrok while developing). Don’t commit rotating tunnel URLs.
 
