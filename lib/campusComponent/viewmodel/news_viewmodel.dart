@@ -38,6 +38,43 @@ class NewsViewModel {
     return mappedNews;
   }
 
+  /// Returns news items whose title + body contain at least one of the
+  /// given [interests] (case-insensitive), sorted by (match count desc,
+  /// date desc). Returns an empty list if no interests are set or no news
+  /// has been loaded yet.
+  List<News> forYouNews(List<String> interests) {
+    final source = news.value;
+    if (source == null || source.isEmpty || interests.isEmpty) {
+      return const [];
+    }
+    final normalized = interests
+        .map((e) => e.trim().toLowerCase())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    if (normalized.isEmpty) return const [];
+
+    final scored = <(int, News)>[];
+    for (final n in source) {
+      final score = _scoreNews(n, normalized);
+      if (score > 0) scored.add((score, n));
+    }
+    scored.sort((a, b) {
+      final byScore = b.$1.compareTo(a.$1);
+      if (byScore != 0) return byScore;
+      return b.$2.date.toDateTime().compareTo(a.$2.date.toDateTime());
+    });
+    return scored.map((e) => e.$2).toList();
+  }
+
+  int _scoreNews(News n, List<String> normalizedInterests) {
+    final hay = '${n.title} ${n.text}'.toLowerCase();
+    var score = 0;
+    for (final interest in normalizedInterests) {
+      if (hay.contains(interest)) score += 1;
+    }
+    return score;
+  }
+
   List<News> latestFiveNews() {
     if (news.value != null) {
       final news = this.news.value!;

@@ -11,7 +11,8 @@ enum UserPreference {
   weekends(bool),
   hiddenCalendarEntries(bool),
   calendarSync(bool),
-  calendarTab(int);
+  calendarTab(int),
+  userInterests(List<String>);
 
   final Type type;
 

@@ -4,6 +4,7 @@ import 'package:campus_flutter/base/enums/search_type.dart';
 import 'package:campus_flutter/base/networking/protocols/api.dart';
 import 'package:campus_flutter/base/routing/router.dart';
 import 'package:campus_flutter/base/routing/routes.dart' as routes;
+import 'package:campus_flutter/base/services/user_interests_service.dart';
 import 'package:campus_flutter/calendarComponent/views/calendars_view.dart';
 import 'package:campus_flutter/campusComponent/service/news_service.dart';
 import 'package:campus_flutter/calendarComponent/model/calendar_editing.dart';
@@ -38,6 +39,10 @@ class AgentClientTools {
   static const String toolCreateCalendarEvent = 'create_calendar_event';
   static const String toolGetMyCourses = 'get_my_courses';
   static const String toolGetGrades = 'get_grades';
+
+  static const String toolRememberInterest = 'remember_interest';
+  static const String toolForgetInterest = 'forget_interest';
+  static const String toolGetInterests = 'get_interests';
 
   static const String toolNavigate = 'navigate';
   static const String toolOpenSearch = 'open_search';
@@ -86,6 +91,10 @@ class AgentClientTools {
       ),
       toolGetMyCourses: _RequireLoginTool(delegate: _GetMyCoursesTool()),
       toolGetGrades: _RequireLoginTool(delegate: _GetGradesTool()),
+
+      toolRememberInterest: _RememberInterestTool(ref: ref),
+      toolForgetInterest: _ForgetInterestTool(ref: ref),
+      toolGetInterests: _GetInterestsTool(ref: ref),
 
       toolNavigate: _NavigateTool(ref: ref),
       toolOpenSearch: _OpenSearchTool(ref: ref),
@@ -552,6 +561,68 @@ class _GetGradesTool implements ClientTool {
       'count': items.length,
       'grades': items,
       'averages': averages,
+    });
+  }
+}
+
+class _RememberInterestTool implements ClientTool {
+  final WidgetRef ref;
+  _RememberInterestTool({required this.ref});
+
+  @override
+  Future<ClientToolResult?> execute(Map<String, dynamic> parameters) async {
+    final raw = _asString(parameters['interest']) ??
+        _asString(parameters['topic']) ??
+        _asString(parameters['keyword']);
+    if (raw == null || raw.trim().isEmpty) {
+      return ClientToolResult.failure(
+        'Missing "interest" parameter (non-empty string).',
+      );
+    }
+    final interests = await UserInterests.addWith(ref, raw);
+    return ClientToolResult.success({
+      'ok': true,
+      'added': normalizeInterest(raw),
+      'interests': interests,
+      'count': interests.length,
+    });
+  }
+}
+
+class _ForgetInterestTool implements ClientTool {
+  final WidgetRef ref;
+  _ForgetInterestTool({required this.ref});
+
+  @override
+  Future<ClientToolResult?> execute(Map<String, dynamic> parameters) async {
+    final raw = _asString(parameters['interest']) ??
+        _asString(parameters['topic']) ??
+        _asString(parameters['keyword']);
+    if (raw == null || raw.trim().isEmpty) {
+      return ClientToolResult.failure(
+        'Missing "interest" parameter (non-empty string).',
+      );
+    }
+    final interests = await UserInterests.removeWith(ref, raw);
+    return ClientToolResult.success({
+      'ok': true,
+      'removed': normalizeInterest(raw),
+      'interests': interests,
+      'count': interests.length,
+    });
+  }
+}
+
+class _GetInterestsTool implements ClientTool {
+  final WidgetRef ref;
+  _GetInterestsTool({required this.ref});
+
+  @override
+  Future<ClientToolResult?> execute(Map<String, dynamic> parameters) async {
+    final interests = ref.read(userInterestsProvider);
+    return ClientToolResult.success({
+      'count': interests.length,
+      'interests': interests,
     });
   }
 }
