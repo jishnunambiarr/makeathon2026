@@ -58,3 +58,4 @@ bugreport-*.zip
 ios/.derived*
 
 node_modules/
+.moodle-storage.json
