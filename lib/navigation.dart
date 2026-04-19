@@ -20,6 +20,10 @@ class Navigation extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    return _navigationScaffold(context, ref);
+  }
+
+  Widget _navigationScaffold(BuildContext context, WidgetRef ref) {
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,

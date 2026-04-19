@@ -35,6 +35,9 @@ const studyRooms = "/studyRooms";
 /// Agent tab
 const agent = "/agent";
 
+/// Branch index for [StatefulShellRoute] in `router.dart` (home=0 … agent=5).
+const int agentShellBranchIndex = 5;
+
 /// Settings
 const menuSettings = "/menu+settings";
 const feedback = "$menuSettings/feedback";
