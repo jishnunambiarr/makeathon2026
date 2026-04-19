@@ -171,9 +171,7 @@ class _CampusAppState extends ConsumerState<CampusApp> {
         ]);
         return locale;
       },
-      builder: (context, child) {
-        return CocoOverlayService.instance.wrapWithOverlay(child);
-      },
+      builder: (context, child) => child ?? const SizedBox.shrink(),
       routerConfig: ref.watch(routerProvider),
     );
   }

@@ -1,19 +1,9 @@
-import 'package:campus_flutter/base/routing/routes.dart';
 import 'package:campus_flutter/main.dart';
 import 'package:campus_flutter/navigation_service.dart';
-import 'package:campus_flutter/ui/coco_overlay_service.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-
-void _syncCocoOverlayWithShell(StatefulNavigationShell shell) {
-  final coco = getIt<CocoOverlayService>();
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    coco.visible.value = coco.voiceSessionActive.value &&
-        shell.currentIndex != agentShellBranchIndex;
-  });
-}
 
 class Navigation extends ConsumerWidget {
   const Navigation({Key? key, required this.navigationShell})
@@ -26,19 +16,11 @@ class Navigation extends ConsumerWidget {
       index,
       initialLocation: index == navigationShell.currentIndex,
     );
-    _syncCocoOverlayWithShell(navigationShell);
   }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final coco = getIt<CocoOverlayService>();
-    return ListenableBuilder(
-      listenable: coco.voiceSessionActive,
-      builder: (context, _) {
-        _syncCocoOverlayWithShell(navigationShell);
-        return _navigationScaffold(context, ref);
-      },
-    );
+    return _navigationScaffold(context, ref);
   }
 
   Widget _navigationScaffold(BuildContext context, WidgetRef ref) {
