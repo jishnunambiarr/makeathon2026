@@ -85,7 +85,9 @@ function parseDemoAssignmentLinksFromEnv() {
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
-// POST body may include tumToken for future use; token is not stored. Env: XI_API_KEY, ELEVEN_AGENT_ID.
+// Security-sensitive backend-only endpoint: do not call this directly from client code.
+// Never expose or log XI_API_KEY; keep it only on the server. Env: XI_API_KEY, ELEVEN_AGENT_ID.
+// POST body may include tumToken for future use; token is not stored.
 app.post('/agent/session', async (req, res) => {
   const schema = z.object({
     tumToken: z.string().min(1).optional(),
